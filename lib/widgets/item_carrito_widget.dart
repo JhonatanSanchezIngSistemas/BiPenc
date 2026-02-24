@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import '../models/producto.dart';
 
 /// Widget modular para un ítem del carrito.
-/// Permite editar cantidad, precio amigo, y activar modo mayorista.
 class ItemCarritoWidget extends StatelessWidget {
   final ItemCarrito item;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final VoidCallback onRemove;
-  final ValueChanged<bool> onMayoristaChanged;
   final ValueChanged<double> onPrecioEditado;
 
   const ItemCarritoWidget({
@@ -17,7 +15,6 @@ class ItemCarritoWidget extends StatelessWidget {
     required this.onIncrement,
     required this.onDecrement,
     required this.onRemove,
-    required this.onMayoristaChanged,
     required this.onPrecioEditado,
   });
 
@@ -49,11 +46,32 @@ class ItemCarritoWidget extends StatelessWidget {
                           color: Colors.white,
                         ),
                       ),
-                      Text(
-                        item.producto.marca,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: Colors.grey.shade500,
-                        ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            item.producto.marca,
+                            style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade500),
+                          ),
+                          const SizedBox(width: 8),
+                          // Etiqueta de presentación usando el nombre real
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.tealAccent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.tealAccent.withOpacity(0.2)),
+                            ),
+                            child: Text(
+                              item.presentacion.nombre.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.tealAccent,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -67,10 +85,10 @@ class ItemCarritoWidget extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
+
             // ── Fila de precios ──
             Row(
               children: [
-                // Precio original (tachado si hay descuento)
                 if (tieneDescuento)
                   Text(
                     'S/ ${item.precioOriginal.toStringAsFixed(2)}',
@@ -81,31 +99,26 @@ class ItemCarritoWidget extends StatelessWidget {
                     ),
                   ),
                 if (tieneDescuento) const SizedBox(width: 8),
-                // Precio actual
                 Text(
                   'S/ ${item.precioActual.toStringAsFixed(2)}',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: tieneDescuento
-                        ? const Color(0xFF2ECC71) // Verde esmeralda
-                        : Colors.tealAccent,
+                    color: tieneDescuento ? const Color(0xFF2ECC71) : Colors.tealAccent,
                   ),
                 ),
                 const Spacer(),
-                // Subtotal
                 Text(
                   'Sub: S/ ${item.subtotal.toStringAsFixed(2)}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade400,
-                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade400),
                 ),
               ],
             ),
             const SizedBox(height: 12),
+
             // ── Fila de controles ──
             Row(
               children: [
-                // Cantidad -/+
+                // Botones cantidad
                 Container(
                   decoration: BoxDecoration(
                     color: const Color(0xFF2A2A3E),
@@ -114,10 +127,7 @@ class ItemCarritoWidget extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _BotonCantidad(
-                        icon: Icons.remove,
-                        onTap: onDecrement,
-                      ),
+                      _BotonCantidad(icon: Icons.remove, onTap: onDecrement),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Text(
@@ -128,14 +138,12 @@ class ItemCarritoWidget extends StatelessWidget {
                           ),
                         ),
                       ),
-                      _BotonCantidad(
-                        icon: Icons.add,
-                        onTap: onIncrement,
-                      ),
+                      _BotonCantidad(icon: Icons.add, onTap: onIncrement),
                     ],
                   ),
                 ),
                 const SizedBox(width: 10),
+
                 // Botón Precio Amigo
                 OutlinedButton.icon(
                   onPressed: () => _mostrarDialogoPrecio(context),
@@ -146,33 +154,26 @@ class ItemCarritoWidget extends StatelessWidget {
                     side: const BorderSide(color: Color(0xFF2ECC71), width: 1),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     minimumSize: Size.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
+
                 const Spacer(),
-                // Switch Mayorista
-                Column(
-                  children: [
-                    Text(
-                      'Mayorista',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: Colors.grey.shade500,
-                        fontSize: 10,
-                      ),
+
+                // Indicador de factor de presentación
+                if (item.presentacion.factor > 1)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurpleAccent.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.deepPurpleAccent.withOpacity(0.3)),
                     ),
-                    SizedBox(
-                      height: 28,
-                      child: Switch(
-                        value: item.esMayorista,
-                        onChanged: onMayoristaChanged,
-                        activeColor: Colors.tealAccent,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
+                    child: Text(
+                      '×${item.presentacion.factor} = ${item.unidadesTotales} uds',
+                      style: const TextStyle(color: Colors.deepPurpleAccent, fontSize: 10),
                     ),
-                  ],
-                ),
+                  ),
               ],
             ),
           ],
@@ -181,47 +182,32 @@ class ItemCarritoWidget extends StatelessWidget {
     );
   }
 
-  /// Diálogo para ingresar un precio personalizado ("Precio Amigo").
   void _mostrarDialogoPrecio(BuildContext context) {
-    final controller = TextEditingController(
-      text: item.precioActual.toStringAsFixed(2),
-    );
+    final controller = TextEditingController(text: item.precioActual.toStringAsFixed(2));
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E2C),
-        title: const Text('Precio Amigo',
-            style: TextStyle(color: Colors.tealAccent)),
+        title: const Text('Precio Amigo', style: TextStyle(color: Colors.tealAccent)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Precio base: S/ ${item.producto.precioBase.toStringAsFixed(2)}',
-              style: TextStyle(color: Colors.grey.shade400),
-            ),
-            Text(
-              'Precio mayorista: S/ ${item.producto.precioMayorista.toStringAsFixed(2)}',
+              'Precio normal: S/ ${item.producto.precioBase.toStringAsFixed(2)}',
               style: TextStyle(color: Colors.grey.shade400),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: controller,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: const TextStyle(color: Colors.white, fontSize: 22),
               textAlign: TextAlign.center,
               decoration: InputDecoration(
                 prefixText: 'S/ ',
-                prefixStyle: TextStyle(
-                    color: Colors.grey.shade400, fontSize: 22),
+                prefixStyle: TextStyle(color: Colors.grey.shade400, fontSize: 22),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: Colors.tealAccent),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      BorderSide(color: Colors.grey.shade700),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -234,24 +220,18 @@ class ItemCarritoWidget extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () {
-              // Restaurar precio original
               onPrecioEditado(item.producto.precioBase);
               Navigator.pop(ctx);
             },
-            child: const Text('Restaurar',
-                style: TextStyle(color: Colors.grey)),
+            child: const Text('Restaurar', style: TextStyle(color: Colors.grey)),
           ),
           FilledButton(
             onPressed: () {
-              final valor = double.tryParse(controller.text);
-              if (valor != null && valor > 0) {
-                onPrecioEditado(valor);
-              }
+              final valor = double.tryParse(controller.text.replaceAll(',', '.'));
+              if (valor != null && valor > 0) onPrecioEditado(valor);
               Navigator.pop(ctx);
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2ECC71),
-            ),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2ECC71)),
             child: const Text('Aplicar'),
           ),
         ],
@@ -260,7 +240,6 @@ class ItemCarritoWidget extends StatelessWidget {
   }
 }
 
-/// Botón redondo para incrementar/decrementar cantidad.
 class _BotonCantidad extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;

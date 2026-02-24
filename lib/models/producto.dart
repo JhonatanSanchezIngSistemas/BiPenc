@@ -1,133 +1,238 @@
-/// Modelo de producto para la librería BiPenc.
+class Presentacion {
+  final String id;
+  final String nombre;
+  final int factor;
+  final double precio;
+  final String? codigoBarras;
+
+  const Presentacion({
+    required this.id,
+    required this.nombre,
+    required this.factor,
+    required this.precio,
+    this.codigoBarras,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'nombre': nombre,
+    'factor': factor,
+    'precio': precio,
+    'codigo_barras': codigoBarras,
+  };
+
+  factory Presentacion.fromJson(Map<String, dynamic> json) => Presentacion(
+    id: json['id'] ?? 'unid',
+    nombre: json['nombre'] ?? 'Unidad',
+    factor: json['factor'] ?? 1,
+    precio: (json['precio'] ?? 0).toDouble(),
+    codigoBarras: json['codigo_barras'],
+  );
+
+  Presentacion copyWith({
+    String? id,
+    String? nombre,
+    int? factor,
+    double? precio,
+    String? codigoBarras,
+  }) =>
+      Presentacion(
+        id: id ?? this.id,
+        nombre: nombre ?? this.nombre,
+        factor: factor ?? this.factor,
+        precio: precio ?? this.precio,
+        codigoBarras: codigoBarras ?? this.codigoBarras,
+      );
+
+  // Presentaciones estándar reutilizables
+  static const unidad = Presentacion(id: 'unid', nombre: 'Unidad', factor: 1, precio: 0);
+  static const mayorista = Presentacion(id: 'mayo', nombre: 'Mayorista', factor: 1, precio: 0);
+  static const caja12 = Presentacion(id: 'c12', nombre: 'Caja x12', factor: 12, precio: 0);
+  static const caja72 = Presentacion(id: 'c72', nombre: 'Caja x72', factor: 72, precio: 0);
+}
+
 class Producto {
   final String id;
   final String nombre;
   final String marca;
   final String categoria;
-  final double precioBase;
-  final double precioMayorista;
-
+  final List<Presentacion> presentaciones;
   final String? imagenPath;
+  final String estado;
+  final String? creadoPor;
+  final DateTime? updatedAt;
 
   const Producto({
     required this.id,
     required this.nombre,
     required this.marca,
     required this.categoria,
-    required this.precioBase,
-    required this.precioMayorista,
+    this.presentaciones = const [],
     this.imagenPath,
+    this.estado = 'PENDIENTE',
+    this.creadoPor,
+    this.updatedAt,
   });
+
+  Producto copyWith({
+    String? id,
+    String? nombre,
+    String? marca,
+    String? categoria,
+    List<Presentacion>? presentaciones,
+    String? imagenPath,
+    String? estado,
+    String? creadoPor,
+    DateTime? updatedAt,
+  }) =>
+      Producto(
+        id: id ?? this.id,
+        nombre: nombre ?? this.nombre,
+        marca: marca ?? this.marca,
+        categoria: categoria ?? this.categoria,
+        presentaciones: presentaciones ?? this.presentaciones,
+        imagenPath: imagenPath ?? this.imagenPath,
+        estado: estado ?? this.estado,
+        creadoPor: creadoPor ?? this.creadoPor,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
+
+  // ── Getters de compatibilidad retroactiva ──
+
+  double get precioBase {
+    try {
+      return presentaciones.firstWhere((p) => p.id == 'unid').precio;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  double get precioMayorista {
+    try {
+      return presentaciones.firstWhere((p) => p.id == 'mayo').precio;
+    } catch (_) {
+      return precioBase;
+    }
+  }
+
+  double getPrecioPresentacion(String idPres) {
+    try {
+      return presentaciones.firstWhere((p) => p.id == idPres).precio;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  String? get codigoBarrasBase {
+    try {
+      return presentaciones.firstWhere((p) => p.id == 'unid').codigoBarras;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
-/// Ítem del carrito con soporte para edición de precio y modo mayorista.
+// ──────────────────────────────────────────────
+// Categorías predefinidas del catálogo
+// ──────────────────────────────────────────────
+
+class CategoriasProducto {
+  CategoriasProducto._();
+
+  static const List<String> lista = [
+    'Cuadernos',
+    'Lapiceros',
+    'Arte',
+    'Útiles',
+    'Papelería',
+    'Mochilas',
+    'Tecnología',
+    'Otros',
+  ];
+}
+
+// ──────────────────────────────────────────────
+// Perfil de usuario con roles expandidos
+// ──────────────────────────────────────────────
+
+class Perfil {
+  final String id;
+  final String nombre;
+  final String apellido;
+  final String alias;
+
+  /// Roles disponibles: 'SERVER', 'ADMIN', 'VENTAS'
+  final String rol;
+  final String? deviceId;
+
+  const Perfil({
+    required this.id,
+    required this.nombre,
+    required this.apellido,
+    required this.alias,
+    required this.rol,
+    this.deviceId,
+  });
+
+  String get nombreCompleto => '$nombre $apellido';
+
+  bool get esServer => rol == 'SERVER';
+  bool get esAdmin => rol == 'ADMIN';
+  bool get esVentas => rol == 'VENTAS';
+
+  /// Puede crear y editar productos
+  bool get puedeGestionarProductos => esServer || esAdmin;
+
+  /// Puede acceder a módulo de auditoría
+  bool get puedeAuditar => esServer || esAdmin;
+}
+
+// ──────────────────────────────────────────────
+// Ítem del carrito
+// ──────────────────────────────────────────────
+
 class ItemCarrito {
   final Producto producto;
   int cantidad;
   double? precioEditado;
-  bool esMayorista;
+  Presentacion presentacion;
 
   ItemCarrito({
     required this.producto,
     this.cantidad = 1,
     this.precioEditado,
-    this.esMayorista = false,
-  });
+    Presentacion? presentacion,
+  }) : presentacion = presentacion ?? Presentacion.unidad;
 
-  /// Precio efectivo según el modo activo.
+  /// Precio efectivo según presentación y cualquier edición manual.
   double get precioActual {
     if (precioEditado != null) return precioEditado!;
-    if (esMayorista) return producto.precioMayorista;
+
+    final pArray = producto.presentaciones.where((p) => p.id == presentacion.id);
+    if (pArray.isNotEmpty && pArray.first.precio > 0) {
+      return pArray.first.precio;
+    }
+
+    // Fallback al precio base si la presentación no tiene precio definido
     return producto.precioBase;
   }
 
-  /// Precio original sin descuentos.
-  double get precioOriginal => producto.precioBase;
+  /// Unidades individuales totales de este ítem.
+  int get unidadesTotales => cantidad * presentacion.factor;
+
+  /// Precio original sin edición (precio unitario de la unidad base).
+  double get precioOriginal => producto.precioBase * presentacion.factor;
 
   /// Subtotal de este ítem.
   double get subtotal => precioActual * cantidad;
 
-  /// Ahorro por unidad respecto al precio base.
-  double get ahorroPorUnidad => producto.precioBase - precioActual;
+  /// Ahorro vs precio original.
+  double get ahorroPorUnidad {
+    final original = producto.precioBase * presentacion.factor;
+    return (original - precioActual).clamp(0.0, double.infinity);
+  }
 
-  /// Ahorro total de este ítem.
   double get ahorroTotal => ahorroPorUnidad * cantidad;
 
-  /// Si el precio fue modificado respecto al base.
-  bool get tieneDescuento => precioActual < producto.precioBase;
+  bool get tieneDescuento => precioActual < (producto.precioBase * presentacion.factor);
 }
-
-// ──────────────────────────────────────────────
-// Datos mock — catálogo de librería
-// ──────────────────────────────────────────────
-
-final List<Producto> catalogoMock = [
-  // Cuadernos
-  const Producto(
-    id: 'CUA-001', nombre: 'Cuaderno A4 Cuadriculado', marca: 'Scribe',
-    categoria: 'Cuadernos', precioBase: 5.50, precioMayorista: 4.20,
-  ),
-  const Producto(
-    id: 'CUA-002', nombre: 'Cuaderno A4 Rayado', marca: 'Scribe',
-    categoria: 'Cuadernos', precioBase: 5.50, precioMayorista: 4.20,
-  ),
-  const Producto(
-    id: 'CUA-003', nombre: 'Cuaderno A4 Cuadriculado', marca: 'Stanford',
-    categoria: 'Cuadernos', precioBase: 6.00, precioMayorista: 4.80,
-  ),
-  const Producto(
-    id: 'CUA-004', nombre: 'Cuaderno A4 Rayado', marca: 'Stanford',
-    categoria: 'Cuadernos', precioBase: 6.00, precioMayorista: 4.80,
-  ),
-  const Producto(
-    id: 'CUA-005', nombre: 'Cuaderno A5 Empastado', marca: 'Justus',
-    categoria: 'Cuadernos', precioBase: 8.00, precioMayorista: 6.50,
-  ),
-  // Lapiceros
-  const Producto(
-    id: 'LAP-001', nombre: 'Lapicero Azul 035F', marca: 'Faber-Castell',
-    categoria: 'Lapiceros', precioBase: 1.00, precioMayorista: 0.70,
-  ),
-  const Producto(
-    id: 'LAP-002', nombre: 'Lapicero Negro 035F', marca: 'Faber-Castell',
-    categoria: 'Lapiceros', precioBase: 1.00, precioMayorista: 0.70,
-  ),
-  const Producto(
-    id: 'LAP-003', nombre: 'Lapicero Azul Trimax', marca: 'Pilot',
-    categoria: 'Lapiceros', precioBase: 2.50, precioMayorista: 1.80,
-  ),
-  const Producto(
-    id: 'LAP-004', nombre: 'Lapicero Rojo Trimax', marca: 'Pilot',
-    categoria: 'Lapiceros', precioBase: 2.50, precioMayorista: 1.80,
-  ),
-  // Colores y arte
-  const Producto(
-    id: 'COL-001', nombre: 'Colores x12', marca: 'Faber-Castell',
-    categoria: 'Arte', precioBase: 8.00, precioMayorista: 6.00,
-  ),
-  const Producto(
-    id: 'COL-002', nombre: 'Colores x24', marca: 'Faber-Castell',
-    categoria: 'Arte', precioBase: 15.00, precioMayorista: 11.50,
-  ),
-  const Producto(
-    id: 'COL-003', nombre: 'Plumones x12', marca: 'Artesco',
-    categoria: 'Arte', precioBase: 6.00, precioMayorista: 4.50,
-  ),
-  // Útiles varios
-  const Producto(
-    id: 'UTI-001', nombre: 'Borrador Blanco Grande', marca: 'Faber-Castell',
-    categoria: 'Útiles', precioBase: 0.50, precioMayorista: 0.30,
-  ),
-  const Producto(
-    id: 'UTI-002', nombre: 'Tajador Metálico', marca: 'Faber-Castell',
-    categoria: 'Útiles', precioBase: 1.00, precioMayorista: 0.60,
-  ),
-  const Producto(
-    id: 'UTI-003', nombre: 'Pegamento en Barra 40g', marca: 'UHU',
-    categoria: 'Útiles', precioBase: 3.50, precioMayorista: 2.50,
-  ),
-  const Producto(
-    id: 'UTI-004', nombre: 'Tijera Escolar 5"', marca: 'Artesco',
-    categoria: 'Útiles', precioBase: 3.00, precioMayorista: 2.20,
-  ),
-];

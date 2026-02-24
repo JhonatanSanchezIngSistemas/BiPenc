@@ -1,9 +1,30 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Cámara y Almacenamiento -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <!-- Bluetooth Clásico (Android ≤ 11) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+
+    <!-- Bluetooth Moderno (Android 12+) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+    <!-- Ubicación (requerida para escaneo BT pre-Android 12) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Feature BT -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
+
+    <!-- USB OTG (Host mode para impresora) -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
     <application
-        android:label="bipenc"
+        android:label="BiPenc"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
