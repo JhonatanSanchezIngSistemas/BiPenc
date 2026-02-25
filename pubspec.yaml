@@ -1,50 +1,63 @@
 name: bipenc
 description: "BiPenc - Sistema Experto de Inventario y POS. Desarrollado por Jhonatan (Ing. de Sistemas)."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
-  sdk: ^3.11.0
+  sdk: ^3.5.0
 
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  
-  # Gestión de Estado y Rutas (Responsabilidad Única)
+
+  # Estado y Rutas
   provider: ^6.1.2
-  go_router: ^13.2.0
+  go_router: ^14.6.2
 
-  # Cámara y Procesamiento de Imágenes (IA Local)
-  camera: ^0.11.0
-  path_provider: ^2.1.2
-  google_mlkit_selfie_segmentation: ^0.5.0 # Para el recorte de fondo tipo AI
+  # Cámara
+  camera: ^0.11.0+2
+  path_provider: ^2.1.4
 
-  # Impresión Térmica y Documentos
-  print_bluetooth_thermal: ^1.2.0
-  esc_pos_utils: ^1.1.0
-  pdf: ^3.10.8
-
-  # Persistencia y Nube
-  supabase_flutter: ^2.0.2
-  shared_preferences: ^2.2.2
-  cached_network_image: ^3.4.1
+  # Imagen — recorte local de fondo
+  image: 4.2.0
   flutter_image_compress: ^2.3.0
-  logger: ^2.0.2
-  crypto: ^3.0.3
+
+  # Impresión Térmica (Plus Edition for compatibility)
+  print_bluetooth_thermal: ^1.1.7
+  esc_pos_utils_plus: 2.0.3
+  pdf: ^3.11.1
+
+  # Backend / Persistencia
+  supabase_flutter: ^2.9.0
+  sqflite_sqlcipher: 3.4.0
+  connectivity_plus: 6.1.3
+  permission_handler: ^11.3.1
+  shared_preferences: ^2.3.3
+  cached_network_image: ^3.4.1
+  logger: ^2.4.0
+  crypto: ^3.0.6
+
+  # Red
+  http: ^1.2.2
+
+  # Autenticación Biométrica
+  local_auth: 2.3.0
+  package_info_plus: ^8.1.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
-  flutter_launcher_icons: ^0.13.1
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/logo/logo_bipenc.png"
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/logo/logo_bipenc.png"
+  image_path: "assets/logo/logo.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/logo/logo.png"
+  min_sdk_android: 21
 
 flutter:
   uses-material-design: true

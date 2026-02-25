@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:bipenc/features/settings/printer_config_screen.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'data/local/db_helper.dart';
+import 'services/security_service.dart';
 import 'features/home/home_screen.dart';
 import 'features/inventario/inventario_screen.dart';
 import 'features/inventario/producto_form_screen.dart';
@@ -11,6 +14,10 @@ import 'features/settings/settings_screen.dart';
 import 'features/reports/cierre_caja_screen.dart';
 import 'package:provider/provider.dart';
 import 'core/theme.dart';
+import 'features/inventario/quick_add_form.dart';
+import 'services/session_manager.dart';
+import 'widgets/session_guard.dart';
+import 'screens/login_page.dart';
 
 // GlobalKey maestro para controlar SnackBars fuera del contexto (Ej. PosProvider sin UI)
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -24,8 +31,18 @@ Future<void> main() async {
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyeHZqaHpzdmZweXR3cmpqdGx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNjQ1NzcsImV4cCI6MjA4Njk0MDU3N30.ZAAe_z0q1H1SfANpy_mwUHrQiGd6owdPvkUAwPZVIow',
   );
 
-  // 2. Lógica de Master Reset (Nube)
+  // 2. Inicializar SecurityService (hash admin 'admin123' en primera apertura)
+  await SecurityService().init();
+
+  // 3. Master Reset desde nube (offline-safe)
   await _verificarMasterReset();
+
+  // 4. Data Seeding: carga catalogo inicial si la BD esta vacia
+  try {
+    await DBHelper().seedIfEmpty();
+  } catch (e) {
+    debugPrint('Seed Error (no critico): $e');
+  }
 
   runApp(const BiPencApp());
 }
@@ -65,33 +82,53 @@ Future<void> _verificarMasterReset() async {
 
 // Configuración inicial de GoRouter
 final GoRouter _router = GoRouter(
-  initialLocation: '/',
+  initialLocation: '/login', // Iniciamos en login para activar chequeo de sesión/biometría
   routes: [
     GoRoute(
-      path: '/',
-      builder: (context, state) => const HomeScreen(),
+      path: '/login',
+      builder: (context, state) => const LoginPage(),
     ),
-    GoRoute(
-      path: '/inventario',
-      builder: (context, state) => const InventarioScreen(),
+    // Rutas protegidas por SessionGuard (Art 1)
+    ShellRoute(
+      builder: (context, state, child) => SessionGuard(child: child),
       routes: [
         GoRoute(
-          path: 'nuevo',
-          builder: (context, state) => const ProductoFormScreen(),
+          path: '/',
+          builder: (context, state) => const HomeScreen(),
+        ),
+        GoRoute(
+          path: '/inventario',
+          builder: (context, state) => const InventarioScreen(),
+          routes: [
+            GoRoute(
+              path: 'nuevo',
+              builder: (context, state) => const ProductoFormScreen(),
+            ),
+            GoRoute(
+              path: 'rapido',
+              builder: (context, state) => const QuickAddForm(),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/pos',
+          builder: (context, state) => const PosScreen(),
+        ),
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsScreen(),
+          routes: [
+            GoRoute(
+              path: 'printer',
+              builder: (context, state) => const PrinterConfigScreen(),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/cierre_caja',
+          builder: (context, state) => const CierreCajaScreen(),
         ),
       ],
-    ),
-    GoRoute(
-      path: '/pos',
-      builder: (context, state) => const PosScreen(),
-    ),
-    GoRoute(
-      path: '/settings',
-      builder: (context, state) => const SettingsScreen(),
-    ),
-    GoRoute(
-      path: '/cierre_caja',
-      builder: (context, state) => const CierreCajaScreen(),
     ),
   ],
 );
@@ -104,6 +141,7 @@ class BiPencApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => PosProvider()),
+        ChangeNotifierProvider(create: (_) => SessionManager()),
       ],
       child: MaterialApp.router(
         scaffoldMessengerKey: scaffoldMessengerKey,
@@ -111,6 +149,8 @@ class BiPencApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         routerConfig: _router,
         theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: ThemeMode.system,
       ),
     );
   }

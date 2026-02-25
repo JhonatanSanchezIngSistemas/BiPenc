@@ -1,9 +1,14 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
-import 'package:esc_pos_utils/esc_pos_utils.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../data/models/business_config.dart';
-import '../features/pos/pos_provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:bipenc/data/models/business_config.dart';
+import 'package:bipenc/features/pos/pos_provider.dart';
 
 class PrintService {
   /// Obtiene la configuración de negocio salvada en caché
@@ -19,7 +24,7 @@ class PrintService {
   }
 
   /// Imprime el ticket usando ESC/POS
-  Future<bool> imprimirTicketCortesía(PosProvider estadoPos, {double ahorroMayorista = 0.0}) async {
+  Future<bool> imprimirTicketCortesia(PosProvider estadoPos, {double ahorroMayorista = 0.0}) async {
     final conectado = await PrintBluetoothThermal.connectionStatus;
     if (!conectado) return false;
 
@@ -40,6 +45,10 @@ class PrintService {
     bytes += generator.text('RUC/NIT: ${config.ruc}', styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text(config.direccion, styles: const PosStyles(align: PosAlign.center));
     bytes += generator.text('Tel: ${config.telefono}', styles: const PosStyles(align: PosAlign.center));
+    // VENDEDOR INFO
+    final user = Supabase.instance.client.auth.currentUser;
+    final vendedor = user?.email ?? 'Cajero';
+    bytes += generator.text('Vendedor: $vendedor', styles: const PosStyles(align: PosAlign.left));
     bytes += generator.feed(1);
     
     // INFO COMPRA
@@ -60,11 +69,12 @@ class PrintService {
       bytes += generator.row([
         PosColumn(text: item.cantidad.toString(), width: 2),
         // Truncamos la descripción si es muy larga
-        PosColumn(text: item.product.descripcion.length > 15 ? item.product.descripcion.substring(0, 15) : item.product.descripcion, width: 6),
+        // Truncamos el nombre si es muy larga
+        PosColumn(text: item.product.nombre.length > 15 ? item.product.nombre.substring(0, 15) : item.product.nombre, width: 6),
         PosColumn(text: (item.subtotal / item.cantidad).toStringAsFixed(2), width: 2),
         PosColumn(text: item.subtotal.toStringAsFixed(2), width: 2),
       ]);
-      bytes += generator.text('   ${item.presentacion.nombre} ${item.isManualPriceAuthorized ? "*" : ""}', styles: const PosStyles(align: PosAlign.left));
+      bytes += generator.text('   ${item.product.nombre} ${item.precioManual != null ? "*" : ""}', styles: const PosStyles(align: PosAlign.left));
     }
 
     bytes += generator.text('--------------------------------', styles: const PosStyles(align: PosAlign.center));
@@ -72,20 +82,20 @@ class PrintService {
     // --- RESUMEN DE PAGO ---
     bytes += generator.row([
       PosColumn(text: 'SUBTOTAL', width: 8, styles: const PosStyles(bold: true)),
-      PosColumn(text: '\$${estadoPos.subtotal.toStringAsFixed(2)}', width: 4, styles: const PosStyles(align: PosAlign.right, bold: true)),
+      PosColumn(text: 'S/. ${estadoPos.totalCobrar.toStringAsFixed(2)}', width: 4, styles: const PosStyles(align: PosAlign.right, bold: true)),
     ]);
 
     if (ahorroMayorista > 0) {
       bytes += generator.row([
-        PosColumn(text: 'AHORRO MAYORISTA M3+', width: 8, styles: const PosStyles(bold: true)),
-        PosColumn(text: '-\$${ahorroMayorista.toStringAsFixed(2)}', width: 4, styles: const PosStyles(align: PosAlign.right, bold: true)),
+        PosColumn(text: 'AHORRO MAYORISTA', width: 8, styles: const PosStyles(bold: true)),
+        PosColumn(text: '-S/. ${ahorroMayorista.toStringAsFixed(2)}', width: 4, styles: const PosStyles(align: PosAlign.right, bold: true)),
       ]);
     }
 
     bytes += generator.feed(1);
     bytes += generator.row([
       PosColumn(text: 'TOTAL A PAGAR', width: 6, styles: const PosStyles(bold: true, height: PosTextSize.size2, width: PosTextSize.size2)),
-      PosColumn(text: '\$${(estadoPos.totalCobrar - ahorroMayorista).toStringAsFixed(2)}', width: 6, styles: const PosStyles(align: PosAlign.right, bold: true, height: PosTextSize.size2, width: PosTextSize.size2)),
+      PosColumn(text: 'S/. ${(estadoPos.totalCobrar - ahorroMayorista).toStringAsFixed(2)}', width: 6, styles: const PosStyles(align: PosAlign.right, bold: true, height: PosTextSize.size2, width: PosTextSize.size2)),
     ]);
 
     // --- PIE Y QR (TICKET DE CORTESÍA) ---
@@ -95,7 +105,7 @@ class PrintService {
     
     // Si la impresora soporta QR Code bitImage, se puede mandar. Para ESC/POS:
     String wameUrl = 'https://wa.me/${config.telefono.replaceAll(RegExp(r"[^\d]"), "")}';
-    bytes += generator.qrcode(wameUrl, size: QRSize.Size6);
+    bytes += generator.qrcode(wameUrl);
     
     bytes += generator.feed(5); // Avance de 5 recortes para liberar el papel
     bytes += generator.cut();

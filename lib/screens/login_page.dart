@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -65,21 +66,35 @@ class _LoginPageState extends State<LoginPage> {
   // ── Lógica Biométrica (Solo si hay sesión) ──
   Future<void> _authenticateBiometric() async {
     try {
+      // Verificar disponibilidad antes de pedir
+      final bool canCheck = await _auth.canCheckBiometrics;
+      if (!canCheck) {
+        await _ingresarApp(); // Sin sensor → entrar directo
+        return;
+      }
       setState(() => _isAuthenticating = true);
       final authenticated = await _auth.authenticate(
         localizedReason: 'Identifícate para entrar a BiPenc',
+        options: const AuthenticationOptions(biometricOnly: false),
       );
       setState(() => _isAuthenticating = false);
-
-      if (authenticated && mounted) {
-        await _ingresarApp();
-      }
+      if (authenticated && mounted) await _ingresarApp();
     } on PlatformException catch (e) {
       setState(() => _isAuthenticating = false);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.message}'), backgroundColor: Colors.red),
-      );
+      // Sensor no disponible / no configurado → entrar sin huella
+      if (['NotAvailable', 'NotEnrolled', 'no_fragment_activity', 'MissingPluginException']
+          .any((c) => e.code.contains(c))) {
+        await _ingresarApp();
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error biométrico: ${e.message}')),
+        );
+      }
+    } catch (_) {
+      setState(() => _isAuthenticating = false);
+      await _ingresarApp(); // Cualquier error → entrar sin huella
     }
   }
 
@@ -157,38 +172,9 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  /// Ingresa a la app usando GoRouter (compatible con el router configurado en main.dart)
   Future<void> _ingresarApp() async {
-    try {
-      final session = SessionService();
-      Perfil? perfil = await session.obtenerPerfil();
-
-      if (perfil != null && mounted) {
-        Navigator.pushReplacementNamed(context, '/venta');
-        return;
-      }
-
-      // Si session service falló, mostramos error SIN cerrar sesión
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo configurar tu perfil. Intenta de nuevo.'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    } catch (e) {
-      AppLogger.error('Error en _ingresarApp', tag: 'LOGIN', error: e);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al ingresar: $e'),
-            backgroundColor: Colors.redAccent,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    }
+    if (mounted) context.go('/pos');
   }
 
   @override
@@ -205,7 +191,23 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                   Text(
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.white10,
+                      shape: BoxShape.circle,
+                    ),
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/logo/logo.png',
+                        height: 120,
+                        width: 120,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
                     'BiPenc',
                     style: Theme.of(context).textTheme.displaySmall?.copyWith(
                           fontWeight: FontWeight.w800,

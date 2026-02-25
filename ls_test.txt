@@ -1,0 +1,23 @@
+total 84
+-rw-r--r--. 1 jhonataningesis jhonataningesis  1420 feb 17 12:47 analysis_options.yaml
+drwxr-xr-x. 1 jhonataningesis jhonataningesis   284 feb 24 00:19 android
+drwxr-xr-x. 1 jhonataningesis jhonataningesis     8 feb 22 22:39 assets
+-rw-r--r--. 1 jhonataningesis jhonataningesis   842 feb 17 12:47 bipenc.iml
+-rw-r--r--. 1 jhonataningesis jhonataningesis   127 feb 17 18:20 build_apk.log
+-rw-r--r--. 1 jhonataningesis jhonataningesis   234 feb 17 18:18 build_linux_v2.log
+-rw-r--r--. 1 jhonataningesis jhonataningesis  6900 feb 24 00:52 build_log.txt
+-rw-r--r--. 1 jhonataningesis jhonataningesis   566 feb 17 18:08 flutter_devices.log
+drwxr-xr-x. 1 jhonataningesis jhonataningesis   136 feb 17 12:47 ios
+drwxr-xr-x. 1 jhonataningesis jhonataningesis   166 feb 22 23:02 lib
+drwxr-xr-x. 1 jhonataningesis jhonataningesis    74 feb 17 12:47 linux
+-rw-r--r--. 1 jhonataningesis jhonataningesis     0 feb 24 01:01 ls_test.txt
+drwxr-xr-x. 1 jhonataningesis jhonataningesis   136 feb 17 12:47 macos
+-rw-r--r--. 1 jhonataningesis jhonataningesis 36837 feb 24 00:27 pubspec.lock
+-rw-r--r--. 1 jhonataningesis jhonataningesis  1271 feb 24 00:26 pubspec.yaml
+-rw-r--r--. 1 jhonataningesis jhonataningesis  2621 feb 17 15:44 README.md
+drwxr-xr-x. 1 jhonataningesis jhonataningesis    32 feb 17 12:47 test
+-rw-r--r--. 1 jhonataningesis jhonataningesis   760 feb 17 18:08 test_results.log
+-rw-r--r--. 1 jhonataningesis jhonataningesis  1791 feb 17 18:12 test_results_v2.log
+-rw-r--r--. 1 jhonataningesis jhonataningesis   166 feb 17 18:18 test_results_v3.log
+drwxr-xr-x. 1 jhonataningesis jhonataningesis    78 feb 17 12:47 web
+drwxr-xr-x. 1 jhonataningesis jhonataningesis    74 feb 17 12:47 windows

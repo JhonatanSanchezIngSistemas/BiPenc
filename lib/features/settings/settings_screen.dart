@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart';
-import 'package:path/path.dart';
-import '../../data/models/business_config.dart';
-import '../../services/security_service.dart';
+import 'package:path/path.dart' as p;
+import 'package:bipenc/data/models/business_config.dart';
+import 'package:bipenc/services/security_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -80,7 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     
     try {
       final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'bipenc_local.db');
+      final path = p.join(dbPath, 'bipenc_local.db');
       final currentDB = File(path);
       
       if (await currentDB.exists()) {
@@ -94,7 +96,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           dir = await getDownloadsDirectory();
         }
         
-        final backupPath = join(dir!.path, 'Respaldo_BiPenc_\${DateTime.now().millisecondsSinceEpoch}.db');
+        final backupPath = p.join(dir!.path, 'Respaldo_BiPenc_\${DateTime.now().millisecondsSinceEpoch}.db');
         await currentDB.copy(backupPath);
         
         if (mounted) {
@@ -106,6 +108,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al generar backup: \$e'), backgroundColor: Colors.red));
       }
     }
+  }
+
+  void _mostrarAyudaWhatsApp() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        title: const Row(children: [Icon(Icons.whatsapp, color: Colors.greenAccent), SizedBox(width: 8), Text('WhatsApp (Meta)', style: TextStyle(color: Colors.white))]),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Para integrar WhatsApp Business API (Cloud), debes registrar la app en el portal de Meta Developers.', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            SizedBox(height: 12),
+            Text('Package Name:', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 12)),
+            Text('com.jhonatan.bipenc', style: TextStyle(color: Colors.white)),
+            SizedBox(height: 12),
+            Text('SHA-256 Check (Terminal):', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 12)),
+            Text('keytool -list -v -keystore ~/.android/debug.keystore', style: TextStyle(color: Colors.white54, fontSize: 11)),
+            SizedBox(height: 12),
+            Text('Cierra el reporte de cierre Z y compártelo usando el botón de compartir.', style: TextStyle(color: Colors.white38, fontSize: 11)),
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CERRAR'))],
+      ),
+    );
   }
 
   void _autenticarAdmin() async {
@@ -249,7 +277,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   foregroundColor: Colors.teal,
                   side: const BorderSide(color: Colors.teal),
                 ),
-              )
+              ),
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: _mostrarAyudaWhatsApp,
+                icon: const Icon(Icons.whatsapp, color: Colors.greenAccent),
+                label: const Text('Configuración WhatsApp (Meta/SHA-256)', style: TextStyle(color: Colors.greenAccent)),
+              ),
             ],
           ),
         ),

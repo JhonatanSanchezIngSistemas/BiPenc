@@ -4,12 +4,10 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
-  file_selector_windows
+  connectivity_plus
   local_auth_windows
   permission_handler_windows
   print_bluetooth_thermal
-  printing
-  share_plus
   url_launcher_windows
 )
 

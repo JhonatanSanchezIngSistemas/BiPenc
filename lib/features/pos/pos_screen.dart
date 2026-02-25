@@ -1,605 +1,391 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../../services/print_service.dart';
-import '../../services/identidad_service.dart';
-import '../../data/local/db_helper.dart';
-import '../../data/models/cliente.dart';
-import 'pos_provider.dart';
+import 'package:go_router/go_router.dart';
+import 'package:bipenc/data/models/product.dart';
+import 'package:bipenc/data/models/cliente.dart';
+import 'package:bipenc/services/identidad_service.dart';
+import 'package:bipenc/services/print_service.dart';
+import 'package:bipenc/widgets/conectividad_indicador.dart';
+import 'package:bipenc/features/pos/pos_provider.dart';
 
-// Definición de _ResumenPagoPanel
-class _ResumenPagoPanel extends StatefulWidget {
-  final PosProvider posState;
-  const _ResumenPagoPanel({required this.posState});
-
+class PosScreen extends StatefulWidget {
+  const PosScreen({super.key});
   @override
-  State<_ResumenPagoPanel> createState() => _ResumenPagoPanelState();
+  State<PosScreen> createState() => _PosScreenState();
 }
 
-class _ResumenPagoPanelState extends State<_ResumenPagoPanel> {
-  final _recibidoCtrl = TextEditingController();
-  final _docCtrl = TextEditingController();
-  final _nombreManualCtrl = TextEditingController();
-  bool _isSearchingId = false;
+class _PosScreenState extends State<PosScreen> {
+  final _searchCtrl = TextEditingController();
+  List<Product> _resultados = [];
+  bool _buscando = false;
 
   @override
   void dispose() {
-    _recibidoCtrl.dispose();
-    _docCtrl.dispose();
-    _nombreManualCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _ejecutarCobro(BuildContext context, PosProvider posState) async {
-    // Generamos boleta en BD
-    await posState.procesarVenta();
-    
-    if (mounted) {
-      // Módulo de Impresión Defensiva
-      try {
-        bool impreso = await PrintService().imprimirTicketCortesía(posState);
-        if (!impreso) {
-          _mostrarErrorImpresora(context);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Venta Registrada e Impresa', style: TextStyle(fontWeight: FontWeight.bold)), backgroundColor: Colors.teal));
-        }
-      } catch (e) {
-          _mostrarErrorImpresora(context);
-      }
+  Future<void> _buscar(String query, PosProvider pos) async {
+    if (query.trim().isEmpty) {
+      setState(() => _resultados = []);
+      return;
     }
-  }
-
-  void _iniciarFlujoIdentidad(BuildContext context, PosProvider posState) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Identidad del Cliente'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.person_search, color: Colors.blue),
-                title: const Text('Boleta (DNI)'),
-                onTap: () { Navigator.pop(ctx); _mostrarIngresoDocumento(context, posState, false); },
-              ),
-              ListTile(
-                leading: const Icon(Icons.domain, color: Colors.orange),
-                title: const Text('Factura (RUC)'),
-                onTap: () { Navigator.pop(ctx); _mostrarIngresoDocumento(context, posState, true); },
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.flash_on, color: Colors.amber),
-                title: const Text('Venta Rápida (Cliente Genérico)'),
-                subtitle: const Text('Omite este paso (< 2s)'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  posState.setCliente(Cliente(documento: '00000000', nombre: 'Público en General'));
-                  _ejecutarCobro(context, posState);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            )
-          ],
-        );
-      }
-    );
-  }
-
-  void _mostrarIngresoDocumento(BuildContext context, PosProvider posState, bool esRuc) {
-    _docCtrl.clear();
-    _nombreManualCtrl.clear();
-    
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctxDialog) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            Future<void> buscarRevisarDb() async {
-              final doc = _docCtrl.text.trim();
-              if (doc.isEmpty) return;
-
-              setModalState(() => _isSearchingId = true);
-
-              // 1. Caché Local Ultra-Rápida (Cero latencia si es cliente frecuente)
-              Cliente? clienteDb = await DBHelper().getCliente(doc);
-              if (clienteDb != null) {
-                posState.setCliente(clienteDb);
-                if (mounted) Navigator.pop(ctxDialog);
-                _ejecutarCobro(context, posState);
-                return;
-              }
-
-              // 2. Consulta Nube (Reniec/Sunat)
-              final apiResult = await IdentidadService().consultarDocumento(doc, esRuc);
-              setModalState(() => _isSearchingId = false);
-
-              if (apiResult != null && apiResult != 'OFFLINE' && apiResult != 'ERROR') {
-                final nuevoCliente = Cliente(documento: doc, nombre: apiResult);
-                await DBHelper().insertCliente(nuevoCliente); // Guardamos en Caché Local
-                posState.setCliente(nuevoCliente);
-                
-                if (mounted) Navigator.pop(ctxDialog);
-                _ejecutarCobro(context, posState);
-              } else {
-                // Modo Offline o Falla de API: Ingreso Manual obligatorio
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sin conexión o documento no encontrado. Ingrese datos manualmente.')));
-              }
-            }
-
-            return AlertDialog(
-              title: Text(esRuc ? 'Ingresar RUC' : 'Ingresar DNI'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: _docCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: esRuc ? 'RUC (11 dígitos)' : 'DNI (8 dígitos)',
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (_isSearchingId) const CircularProgressIndicator(),
-                  // Campo manual semi-oculto que se usa si la API falla
-                  if (!_isSearchingId)
-                    TextField(
-                      controller: _nombreManualCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre o Razón Social (Opcional si API falla)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctxDialog), child: const Text('Cancelar')),
-                FilledButton.icon(
-                  onPressed: _isSearchingId ? null : () {
-                     if (_nombreManualCtrl.text.isNotEmpty) {
-                       // Forzar guardado manual si el usuario ya escribió algo
-                       final manualCli = Cliente(documento: _docCtrl.text, nombre: _nombreManualCtrl.text);
-                       DBHelper().insertCliente(manualCli);
-                       posState.setCliente(manualCli);
-                       Navigator.pop(ctxDialog);
-                       _ejecutarCobro(context, posState);
-                     } else {
-                       buscarRevisarDb(); // Buscar automáticamente
-                     }
-                  },
-                  icon: const Icon(Icons.search),
-                  label: const Text('Buscar y Cobrar'),
-                )
-              ],
-            );
-          }
-        );
-      }
-    );
+    setState(() => _buscando = true);
+    final res = await pos.buscarProductos(query);
+    if (mounted) setState(() { _resultados = res; _buscando = false; });
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final posState = widget.posState;
-    return Container(
-      color: theme.colorScheme.surface,
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('Resumen de Pago', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
-          
-          // Selector de Método de Pago
-          SegmentedButton<MetodoPago>(
-            segments: const [
-              ButtonSegment(value: MetodoPago.efectivo, icon: Icon(Icons.money), label: Text('Efectivo')),
-              ButtonSegment(value: MetodoPago.yapePlin, icon: Icon(Icons.qr_code), label: Text('Yape')),
-              ButtonSegment(value: MetodoPago.tarjeta, icon: Icon(Icons.credit_card), label: Text('Tarjeta')),
+    return Consumer<PosProvider>(
+      builder: (context, pos, _) {
+        return Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.grey.shade900,
+            foregroundColor: Colors.white,
+            title: const Text('BiPenc POS', style: TextStyle(letterSpacing: 1)),
+            actions: [
+              // Indicador online/offline discreto (Constitución Artículo 1.3)
+              const ConectividadIndicador(),
+              IconButton(
+                icon: const Icon(Icons.add_shopping_cart, color: Colors.teal),
+                tooltip: 'Producto genérico',
+                onPressed: () {
+                  pos.agregarProductoGenerico();
+                  _searchCtrl.clear();
+                  setState(() => _resultados = []);
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.inventory_2_outlined),
+                tooltip: 'Inventario',
+                onPressed: () => context.push('/inventario'),
+              ),
             ],
-            selected: {posState.metodoPago},
-            onSelectionChanged: (Set<MetodoPago> newSelection) {
-              posState.setMetodoPago(newSelection.first);
-              if (newSelection.first != MetodoPago.efectivo) {
-                _recibidoCtrl.text = posState.totalCobrar.toStringAsFixed(2);
-              } else {
-                _recibidoCtrl.clear();
-              }
-            },
           ),
-          const SizedBox(height: 16),
-          
-          if (posState.metodoPago == MetodoPago.efectivo)
-            TextField(
-              controller: _recibidoCtrl,
-              decoration: const InputDecoration(labelText: 'Monto Recibido (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money)),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: (val) {
-                final amount = double.tryParse(val) ?? 0.0;
-                posState.setMontoRecibido(amount);
-              },
-            ),
+          body: Column(
+            children: [
+              // ── Pestañas de 5 Clientes (Constitución Artículo 2) ─────────
+              _ClienteTabs(pos: pos),
 
-          if (posState.metodoPago == MetodoPago.efectivo && posState.vuelto > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 16.0),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.green)),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('VUELTO A ENTREGAR:', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text('\$${posState.vuelto.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 24)),
-                  ],
+              // ── Buscador de Productos ─────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: TextField(
+                  controller: _searchCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  onChanged: (q) => _buscar(q, pos),
+                  decoration: InputDecoration(
+                    hintText: 'Buscar por nombre, SKU o marca...',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.search, color: Colors.teal),
+                    suffixIcon: _buscando
+                        ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.teal)))
+                        : _searchCtrl.text.isNotEmpty
+                            ? IconButton(icon: const Icon(Icons.clear, color: Colors.white54), onPressed: () { _searchCtrl.clear(); setState(() => _resultados = []); })
+                            : null,
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.07),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                  ),
                 ),
               ),
-            ),
 
-          const SizedBox(height: 24),
-          _RenglonResumen(label: 'Subtotal', value: posState.subtotal),
-          _RenglonResumen(label: 'Descuento M(3+)', value: 0.0, textColor: Colors.green), // Calculamos la diff real después
-          const Divider(height: 32),
-          _RenglonResumen(label: 'TOTAL', value: posState.totalCobrar, isTotal: true),
-          const Spacer(),
-          SizedBox(
-            height: 60,
-            child: FilledButton.icon(
-              onPressed: posState.canCheckout ? () => _iniciarFlujoIdentidad(context, posState) : null,
-              icon: const Icon(Icons.payments, size: 28),
-              label: const Text('COBRAR E IMPRIMIR', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              style: FilledButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              // ── Resultados de Búsqueda ────────────────────────────────────
+              if (_resultados.isNotEmpty)
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade900,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _resultados.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.white12),
+                    itemBuilder: (ctx, i) {
+                      final p = _resultados[i];
+                      return ListTile(
+                        dense: true,
+                        title: Text(p.nombre, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        subtitle: Text('${p.marca} • ${p.categoria}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('S/.${p.precioBase.toStringAsFixed(2)}', style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 13)),
+                            if (p.tienePrecioMayorista)
+                              Text('May: S/.${p.precioMayorista.toStringAsFixed(2)}', style: const TextStyle(color: Colors.amber, fontSize: 10)),
+                          ],
+                        ),
+                        onTap: () {
+                          pos.agregarProducto(p);
+                          _searchCtrl.clear();
+                          setState(() => _resultados = []);
+                          HapticFeedback.lightImpact();
+                        },
+                      );
+                    },
+                  ),
+                ),
+
+              const Divider(height: 1, color: Colors.white12, indent: 12, endIndent: 12),
+
+              // ── Carrito ───────────────────────────────────────────────────
+              Expanded(
+                child: pos.items.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.white12),
+                            const SizedBox(height: 12),
+                            const Text('Carrito vacío', style: TextStyle(color: Colors.white24, fontSize: 16)),
+                            const SizedBox(height: 4),
+                            Text('Total: S/. ${pos.totalCobrar.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white12, fontSize: 14)),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: pos.items.length,
+                        itemBuilder: (ctx, i) => _CartItemTile(index: i, item: pos.items[i], pos: pos),
+                      ),
+              ),
+            ],
+          ),
+          bottomNavigationBar: _BottomBar(pos: pos),
+        );
+      },
+    );
+  }
+}
+
+// ── Pestañas de 5 Clientes ────────────────────────────────────────────────────
+class _ClienteTabs extends StatelessWidget {
+  final PosProvider pos;
+  const _ClienteTabs({required this.pos});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 40,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        itemCount: pos.maxCarritos,
+        itemBuilder: (ctx, i) {
+          final isActive = pos.activeCartIndex == i;
+          final isEmpty = pos.isCartEmpty(i);
+          return GestureDetector(
+            onTap: () => pos.cambiarCarrito(i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: isActive ? Colors.teal : Colors.white.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: isActive ? Colors.tealAccent : Colors.white12),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    'C${i + 1}',
+                    style: TextStyle(
+                      color: isActive ? Colors.black : Colors.white54,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  if (!isEmpty) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      width: 6, height: 6,
+                      decoration: BoxDecoration(
+                        color: isActive ? Colors.black54 : Colors.tealAccent,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Cart Item Tile ─────────────────────────────────────────────────────────────
+class _CartItemTile extends StatelessWidget {
+  final int index;
+  final CartItem item;
+  final PosProvider pos;
+  const _CartItemTile({required this.index, required this.item, required this.pos});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dismissible(
+      key: Key('item_${index}_${item.product.sku}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        color: Colors.red.shade800,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) => pos.eliminarItem(index),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: ListTile(
+          dense: true,
+          title: Text(item.product.nombre,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Row(
+            children: [
+              GestureDetector(
+                onTap: () => pos.actualizarCantidad(index, -1),
+                child: const Icon(Icons.remove_circle_outline, color: Colors.white38, size: 20),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text('${item.cantidad}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+              GestureDetector(
+                onTap: () => pos.actualizarCantidad(index, 1),
+                child: const Icon(Icons.add_circle_outline, color: Colors.teal, size: 20),
+              ),
+              const SizedBox(width: 8),
+              // Toggle mayorista (si el producto lo soporta)
+              if (item.product.tienePrecioMayorista)
+                GestureDetector(
+                  onTap: () => pos.toggleMayorista(index),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: item.usarPrecioMayorista ? Colors.amber.withOpacity(0.2) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: item.usarPrecioMayorista ? Colors.amber : Colors.white24),
+                    ),
+                    child: Text(
+                      item.etiquetaPrecio,
+                      style: TextStyle(
+                        color: item.usarPrecioMayorista ? Colors.amber : Colors.white38,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ],
+          trailing: GestureDetector(
+            onLongPress: () => _editarPrecio(context),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('S/.${item.subtotal.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 14)),
+                Text('@${item.precioUnitario.toStringAsFixed(2)}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 10)),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  void _mostrarErrorImpresora(BuildContext context) {
+  void _editarPrecio(BuildContext context) {
+    final ctrl = TextEditingController(text: item.precioUnitario.toStringAsFixed(2));
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(children: [Icon(Icons.print_disabled, color: Colors.red), SizedBox(width: 8), Text('Impresora No Detectada')]),
-        content: const Text('La venta fue cobrada y guardada en el sistema, pero no se pudo conectar con la ticketera Bluetooth.\n\n¿Desea re-intentar o continuar guardándolo como Ticket Pendiente?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Continuar sin Imprimir')),
-          FilledButton.icon(
-            onPressed: () {
-               Navigator.pop(ctx);
-               // Reintento opcional
-            },
-            icon: const Icon(Icons.refresh),
-            label: const Text('Re-intentar'),
-          )
-        ],
-      )
-    );
-  }
-}
-
-// Reemplazando el class original _ResumenPagoPanel
-class _ObsoleteResumen extends StatelessWidget {
-
-class _PosScreenState extends State<PosScreen> {
-  final TextEditingController _searchController = TextEditingController();
-
-  void _escanearCodigo() {
-    // TODO: Integrar cámara para buscar productos rápidos
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Escáner activado (Simulación)')),
-    );
-  }
-
-  void _mostrarUltimosTickets(BuildContext context) async {
-    final tickets = await context.read<PosProvider>().obtenerUltimosTickets();
-    if (!context.mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Últimos 5 Tickets', style: Theme.of(context).textTheme.titleLarge),
-              const Divider(),
-              Expanded(
-                child: tickets.isEmpty 
-                  ? const Center(child: Text('No hay ventas registradas aún.'))
-                  : ListView.builder(
-                      itemCount: tickets.length,
-                      itemBuilder: (context, index) {
-                        final v = tickets[index];
-                        return ListTile(
-                          leading: Icon(Icons.receipt_long, color: Theme.of(context).primaryColor),
-                          title: Text('Ticket: ${v.id.substring(v.id.length - 6)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(v.resumenItems, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          trailing: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text('\$${v.total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                              Text(v.metodoPago.name.toUpperCase(), style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                            ],
-                          ),
-                          onTap: () {
-                            // Lógica de re-impresión pasándola a PrintService...
-                            ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Comando de Re-impresión enviado (Simulado)')));
-                            Navigator.pop(ctx);
-                          },
-                        );
-                      }
-                    ),
-              )
-            ],
+        backgroundColor: Colors.grey.shade900,
+        title: const Text('Precio Especial', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            prefixText: 'S/. ',
+            prefixStyle: TextStyle(color: Colors.teal),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.teal)),
           ),
-        );
-      }
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final posState = context.watch<PosProvider>();
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            const Text('Punto de Venta'),
-            const SizedBox(width: 8),
-            // Semáforo de Conexión en vivo
-            Container(
-              width: 12, height: 12,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: posState.isOnline ? Colors.greenAccent : Colors.red,
-                boxShadow: [
-                  BoxShadow(color: posState.isOnline ? Colors.green : Colors.red, blurRadius: 4),
-                ]
-              ),
-            ),
-          ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.history_toggle_off),
-            tooltip: 'Últimos Tickets',
-            onPressed: () => _mostrarUltimosTickets(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_sweep),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar', style: TextStyle(color: Colors.white54))),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.teal),
             onPressed: () {
-              if (posState.items.isNotEmpty) {
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Vaciar Carrito'),
-                    content: const Text('¿Estás seguro de cancelar esta venta?'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('No')),
-                      FilledButton(
-                        onPressed: () {
-                          context.read<PosProvider>().vaciarCarrito();
-                          Navigator.pop(ctx);
-                        },
-                        child: const Text('Sí, vaciar'),
-                      ),
-                    ],
-                  ),
-                );
-              }
+              final p = double.tryParse(ctrl.text);
+              if (p != null && p > 0) pos.setPrecioManual(index, p);
+              Navigator.pop(ctx);
             },
-          )
-        ],
-      ),
-      body: SafeArea(
-        child: Row(
-          children: [
-            // PANEL IZQUIERDO: Búsqueda y Lista de Carrito (70% del ancho en Tablets, 100% en Móviles)
-            Expanded(
-            flex: 6,
-            child: Column(
-              children: [
-                // Pestañas Multi-Carrito (Máximo 3 Clientes en Espera)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  color: theme.colorScheme.surface,
-                  child: Row(
-                    children: [
-                      const Icon(Icons.people_alt_outlined, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      ToggleButtons(
-                        isSelected: [
-                          posState.activeCartIndex == 0,
-                          posState.activeCartIndex == 1,
-                          posState.activeCartIndex == 2,
-                        ],
-                        onPressed: (index) => context.read<PosProvider>().cambiarCarrito(index),
-                        borderRadius: BorderRadius.circular(8),
-                        children: [
-                          Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('Caja 1', style: TextStyle(color: posState.isCartEmpty(0) ? null : Colors.teal, fontWeight: posState.isCartEmpty(0) ? FontWeight.normal : FontWeight.bold))),
-                          Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('Caja 2', style: TextStyle(color: posState.isCartEmpty(1) ? null : Colors.teal, fontWeight: posState.isCartEmpty(1) ? FontWeight.normal : FontWeight.bold))),
-                          Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('Caja 3', style: TextStyle(color: posState.isCartEmpty(2) ? null : Colors.teal, fontWeight: posState.isCartEmpty(2) ? FontWeight.normal : FontWeight.bold))),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                // Barra de Escaneo / Búsqueda
-                Container(
-                  padding: const EdgeInsets.all(16.0),
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: InputDecoration(
-                            hintText: 'Ingresar Código de Barras o Nombre...',
-                            prefixIcon: const Icon(Icons.search),
-                            filled: true,
-                            fillColor: theme.colorScheme.surface,
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          ),
-                          onSubmitted: (val) async {
-                            final codigo = val.trim();
-                            if (codigo.isEmpty) return;
-                            
-                            final prov = context.read<PosProvider>();
-                            final p = await prov.buscarYLlenarCache(codigo);
-                            
-                            if (p != null && mounted) {
-                              prov.agregarProducto(p, p.presentaciones.first);
-                              _searchController.clear();
-                            } else if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Producto no encontrado.'), backgroundColor: Colors.redAccent),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      FloatingActionButton.small(
-                        heroTag: 'gen_btn',
-                        onPressed: () => context.read<PosProvider>().agregarProductoGenerico(),
-                        backgroundColor: Colors.amber,
-                        child: const Icon(Icons.bolt, color: Colors.black),
-                        tooltip: 'Venta Rápida (Genérica)',
-                      ),
-                      const SizedBox(width: 8),
-                      FloatingActionButton.small(
-                        heroTag: 'scan_btn',
-                        onPressed: _escanearCodigo,
-                        child: const Icon(Icons.qr_code_scanner),
-                      ),
-                    ],
-                  ),
-                ),
-                
-                // Lista de Productos en el Carrito
-                Expanded(
-                  child: posState.items.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey.shade400),
-                              const SizedBox(height: 16),
-                              Text('El carrito está vacío', style: TextStyle(color: Colors.grey.shade600, fontSize: 18)),
-                            ],
-                          ),
-                        )
-                      : ListView.separated(
-                          itemCount: posState.items.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final item = posState.items[index];
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: theme.primaryColor.withValues(alpha: 0.1),
-                                child: Text(item.cantidad.toString(), style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.bold)),
-                              ),
-                              title: Text(item.product.descripcion, style: const TextStyle(fontWeight: FontWeight.bold)),
-                              subtitle: Text('${item.presentacion.nombre} • ${item.product.marca}'),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                                    onPressed: () => context.read<PosProvider>().actualizarCantidad(index, -1),
-                                  ),
-                                  Text(
-                                    '\$${item.subtotal.toStringAsFixed(2)}',
-                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.add_circle_outline, color: Colors.green),
-                                    onPressed: () => context.read<PosProvider>().actualizarCantidad(index, 1),
-                                  ),
-                                ],
-                              ),
-                              onLongPress: () {
-                                if (item.product.requiereAutorizacion) {
-                                  // TODO: Abrir modal del SecurityService PIN para cambiar precio manual
-                                }
-                              },
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
+            child: const Text('Aplicar', style: TextStyle(color: Colors.black)),
           ),
-
-          // PANEL DERECHO: Resumen de Pago (Visible siempre en Tablet, o usar BottomSheet en Móvil)
-          if (MediaQuery.of(context).size.width > 600)
-            Expanded(
-              flex: 4,
-              child: _ResumenPagoPanel(posState: posState),
-            ),
         ],
       ),
-      ),
-      
-      // Bottom Bar visible solo en teléfonos (width < 600)
-      bottomNavigationBar: MediaQuery.of(context).size.width <= 600
-        ? _ResumenPagoBottomBar(posState: posState)
-        : null,
     );
   }
 }
 
-}
-
-/// Barra inferior compacta para vista móvil (Vendedores de Pasillo)
-class _ResumenPagoBottomBar extends StatelessWidget {
-  final PosProvider posState;
-  const _ResumenPagoBottomBar({required this.posState});
+// ── Bottom Bar ────────────────────────────────────────────────────────────────
+class _BottomBar extends StatelessWidget {
+  final PosProvider pos;
+  const _BottomBar({required this.pos});
 
   @override
   Widget build(BuildContext context) {
-    if (posState.items.isEmpty) return const SizedBox.shrink();
-
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -5))],
+        color: Colors.grey.shade900,
+        border: const Border(top: BorderSide(color: Colors.white12)),
       ),
       child: SafeArea(
+        top: false,
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Total a Cobrar', style: TextStyle(color: Colors.grey)),
-                Text('\$${posState.totalCobrar.toStringAsFixed(2)}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${pos.cantidadArticulos} art.',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                  Text('S/. ${pos.totalCobrar.toStringAsFixed(2)}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 22)),
+                ],
+              ),
             ),
+            if (pos.items.isNotEmpty)
+              TextButton(
+                onPressed: () => pos.vaciarCarrito(),
+                child: const Text('Limpiar', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              ),
+            const SizedBox(width: 8),
             FilledButton.icon(
-              onPressed: () { /* TODO: Imprimir */ },
-              icon: const Icon(Icons.print),
+              onPressed: pos.items.isEmpty ? null : () => _iniciarCobro(context, pos),
+              icon: const Icon(Icons.point_of_sale),
               label: const Text('COBRAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ],
@@ -607,27 +393,229 @@ class _ResumenPagoBottomBar extends StatelessWidget {
       ),
     );
   }
+
+  void _iniciarCobro(BuildContext context, PosProvider pos) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _PanelCobro(pos: pos),
+    );
+  }
 }
 
-class _RenglonResumen extends StatelessWidget {
-  final String label;
-  final double value;
-  final bool isTotal;
-  final Color? textColor;
+// ── Panel de Cobro ────────────────────────────────────────────────────────────
+class _PanelCobro extends StatefulWidget {
+  final PosProvider pos;
+  const _PanelCobro({required this.pos});
+  @override
+  State<_PanelCobro> createState() => _PanelCobroState();
+}
 
-  const _RenglonResumen({required this.label, required this.value, this.isTotal = false, this.textColor});
+class _PanelCobroState extends State<_PanelCobro> {
+  final _montoCtrl = TextEditingController();
+  final _docCtrl = TextEditingController();
+  bool _buscandoCliente = false;
+  String? _nombreCliente;
+
+  @override
+  void initState() {
+    super.initState();
+    _montoCtrl.text = widget.pos.totalCobrar.toStringAsFixed(2);
+  }
+
+  @override
+  void dispose() {
+    _montoCtrl.dispose();
+    _docCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _buscarCliente(String doc, bool esRuc) async {
+    setState(() { _buscandoCliente = true; _nombreCliente = null; });
+    final nombre = await IdentidadService().consultarDocumento(doc, esRuc);
+    if (!mounted) return;
+    if (nombre == 'OFFLINE') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('📵 Modo Offline: Ingrese el nombre manualmente'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    } else if (nombre != null && nombre != 'ERROR') {
+      setState(() => _nombreCliente = nombre);
+      widget.pos.setCliente(Cliente(documento: doc, nombre: nombre));
+    }
+    setState(() => _buscandoCliente = false);
+  }
+
+  Future<void> _cobrar() async {
+    final monto = double.tryParse(_montoCtrl.text.replaceAll(',', '.'));
+    if (monto != null) widget.pos.setMontoRecibido(monto);
+
+    if (!widget.pos.canCheckout) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.pos.totalCobrar > (monto ?? 0)
+              ? 'Monto insuficiente — faltan S/.${(widget.pos.totalCobrar - (monto ?? 0)).toStringAsFixed(2)}'
+              : 'El carrito está vacío'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    await widget.pos.procesarVenta();
+
+    try {
+      await PrintService().imprimirTicketCortesia(widget.pos);
+    } catch (_) {}
+
+    if (mounted) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Venta registrada'),
+          backgroundColor: Colors.teal,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: isTotal ? 20 : 16, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal)),
-          Text('\$${value.toStringAsFixed(2)}', style: TextStyle(fontSize: isTotal ? 24 : 16, fontWeight: isTotal ? FontWeight.bold : FontWeight.normal, color: textColor)),
+    final pos = widget.pos;
+    final vuelto = (double.tryParse(_montoCtrl.text) ?? 0) - pos.totalCobrar;
+
+    return Container(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        left: 20,
+        right: 20,
+        top: 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Handle
+            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 16),
+
+          Text('Total: S/.${pos.totalCobrar.toStringAsFixed(2)}',
+              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+
+          // Método de pago
+          Row(
+            children: MetodoPago.values.map((m) {
+              final labels = {MetodoPago.efectivo: '💵 Efectivo', MetodoPago.yapePlin: '📱 Yape/Plin', MetodoPago.tarjeta: '💳 Tarjeta'};
+              final isActive = pos.metodoPago == m;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () { pos.setMetodoPago(m); setState(() {}); },
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isActive ? Colors.teal : Colors.white.withOpacity(0.07),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: isActive ? Colors.tealAccent : Colors.white12),
+                    ),
+                    child: Text(labels[m]!, textAlign: TextAlign.center,
+                        style: TextStyle(color: isActive ? Colors.black : Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+
+          // Monto recibido (solo efectivo)
+          if (pos.metodoPago == MetodoPago.efectivo) ...[
+            TextField(
+              controller: _montoCtrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(color: Colors.white, fontSize: 20),
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Monto recibido',
+                labelStyle: TextStyle(color: Colors.white54),
+                prefixText: 'S/. ',
+                prefixStyle: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 20),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.teal)),
+              ),
+            ),
+            if (vuelto > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Vuelto:', style: TextStyle(color: Colors.white54, fontSize: 16)),
+                    Text('S/.${vuelto.toStringAsFixed(2)}',
+                        style: const TextStyle(color: Colors.amber, fontSize: 20, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 12),
+          ],
+
+          // DNI/RUC (opcional)
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _docCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'DNI / RUC (opcional)',
+                    hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                    prefixIcon: const Icon(Icons.person_search, color: Colors.white38, size: 18),
+                    filled: true, fillColor: Colors.white.withOpacity(0.05),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _buscandoCliente
+                  ? const SizedBox(width: 40, height: 40, child: CircularProgressIndicator(color: Colors.teal, strokeWidth: 2))
+                  : IconButton(
+                      icon: const Icon(Icons.search, color: Colors.teal),
+                      onPressed: () {
+                        final doc = _docCtrl.text.trim();
+                        if (doc.length >= 8) _buscarCliente(doc, doc.length == 11);
+                      },
+                    ),
+            ],
+          ),
+          if (_nombreCliente != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('👤 $_nombreCliente',
+                  style: const TextStyle(color: Colors.tealAccent, fontSize: 12)),
+            ),
+          const SizedBox(height: 20),
+
+          FilledButton.icon(
+            onPressed: _cobrar,
+            icon: const Icon(Icons.check_circle),
+            label: const Text('CONFIRMAR COBRO', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 4),
         ],
       ),
-    );
-  }
+    ),
+  );
 }

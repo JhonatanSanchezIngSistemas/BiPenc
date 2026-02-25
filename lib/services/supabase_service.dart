@@ -307,7 +307,7 @@ class SupabaseService {
         'categoria': p.categoria,
         'presentaciones': p.presentaciones.map((pres) => pres.toJson()).toList(),
         'precio_base': p.precioBase,
-        'precio_majorista': p.precioMayorista,
+        'precio_mayorista': p.precioMayorista,
         'precio_caja_12': p.getPrecioPresentacion('c12'),
         'precio_caja_72': p.getPrecioPresentacion('c72'),
         'imagen_url': p.imagenPath,

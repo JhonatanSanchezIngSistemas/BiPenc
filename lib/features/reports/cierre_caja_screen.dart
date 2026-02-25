@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../data/local/db_helper.dart';
 import '../../data/models/venta.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../features/pos/pos_provider.dart';
 
 class CierreCajaScreen extends StatefulWidget {
   const CierreCajaScreen({super.key});
@@ -24,14 +25,11 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
   }
 
   Future<void> _calcularCierreDiario() async {
-    // Obtenemos los últimos 100 tickets del día (ajustable en DBHelper)
     final ventas = await DBHelper().getUltimasVentas(limit: 100);
-    
-    // Filtramos solo los del día actual
     final hoy = DateTime.now();
-    _ventasHoy = ventas.where((v) => 
-      v.fecha.year == hoy.year && 
-      v.fecha.month == hoy.month && 
+    _ventasHoy = ventas.where((v) =>
+      v.fecha.year == hoy.year &&
+      v.fecha.month == hoy.month &&
       v.fecha.day == hoy.day
     ).toList();
 
@@ -55,31 +53,36 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
   Future<void> _enviarReporteWhatsApp() async {
     final tTotal = _totalEfectivo + _totalYapePlin + _totalTarjeta;
     final msg = '''*REPORTE DE CAJA Z - BiPenc*
-📅 Fecha: \${DateTime.now().toString().substring(0, 10)}
+📅 Fecha: ${DateTime.now().toString().substring(0, 10)}
 -----------------------------------
-💵 Efectivo en Caja: \$\${_totalEfectivo.toStringAsFixed(2)}
-📱 Yape/Plin: \$\${_totalYapePlin.toStringAsFixed(2)}
-💳 Tarjetas: \$\${_totalTarjeta.toStringAsFixed(2)}
+💵 Efectivo en Caja: S/.${_totalEfectivo.toStringAsFixed(2)}
+📱 Yape/Plin: S/.${_totalYapePlin.toStringAsFixed(2)}
+💳 Tarjetas: S/.${_totalTarjeta.toStringAsFixed(2)}
 -----------------------------------
-💰 TOTAL INGRESOS: \$\${tTotal.toStringAsFixed(2)}
-🎟️ Tickets Emitidos: \${_ventasHoy.length}
+💰 TOTAL INGRESOS: S/.${tTotal.toStringAsFixed(2)}
+🎟️ Tickets Emitidos: ${_ventasHoy.length}
 
 _Generado automáticamente por BiPenc POS_''';
 
     final textUrl = Uri.encodeComponent(msg);
-    final url = Uri.parse('whatsapp://send?text=\$textUrl');
-    
+    // Usar https:// en lugar de whatsapp:// para mayor compatibilidad
+    final url = Uri.parse('https://wa.me/?text=$textUrl');
+
     try {
       if (await canLaunchUrl(url)) {
-        await launchUrl(url);
+        await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('WhatsApp no está instalado o no se puede abrir.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('WhatsApp no está instalado o no se puede abrir.')),
+          );
         }
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al lanzar WhatsApp.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al lanzar WhatsApp: $e')),
+        );
       }
     }
   }
@@ -109,9 +112,9 @@ _Generado automáticamente por BiPenc POS_''';
                   children: [
                     Text('TOTAL DEL DÍA', style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onPrimaryContainer)),
                     const SizedBox(height: 8),
-                    Text('\$\${granTotal.toStringAsFixed(2)}', style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onPrimaryContainer)),
+                    Text('S/.${granTotal.toStringAsFixed(2)}', style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.onPrimaryContainer)),
                     const SizedBox(height: 8),
-                    Text('\${_ventasHoy.length} operaciones realizadas', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onPrimaryContainer)),
+                    Text('${_ventasHoy.length} operaciones realizadas', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onPrimaryContainer)),
                   ],
                 ),
               ),
@@ -122,11 +125,11 @@ _Generado automáticamente por BiPenc POS_''';
             _buildRow('Efectivo Físico', _totalEfectivo, Icons.money, Colors.green),
             _buildRow('Yape / Plin', _totalYapePlin, Icons.qr_code, Colors.purple),
             _buildRow('Tarjetas', _totalTarjeta, Icons.credit_card, Colors.orange),
-            
+
             const SizedBox(height: 40),
             FilledButton.icon(
               onPressed: _enviarReporteWhatsApp,
-              icon: const SizedBox(width: 24, height: 24, child: Icon(Icons.share)), // Simulación icono WA
+              icon: const SizedBox(width: 24, height: 24, child: Icon(Icons.share)),
               label: const Padding(
                 padding: EdgeInsets.all(16.0),
                 child: Text('Compartir Reporte por WhatsApp', style: TextStyle(fontSize: 16)),
@@ -146,9 +149,12 @@ _Generado automáticamente por BiPenc POS_''';
         children: [
           CircleAvatar(backgroundColor: color.withOpacity(0.1), child: Icon(icon, color: color)),
           const SizedBox(width: 16),
-          Text(label, style: const TextStyle(fontSize: 18)),
-          const Spacer(),
-          Text('\$\${amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          // FIX: Flexible para evitar RenderFlex overflow en pantallas pequeñas
+          Flexible(
+            child: Text(label, style: const TextStyle(fontSize: 18)),
+          ),
+          const SizedBox(width: 8),
+          Text('S/.${amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         ],
       ),
     );

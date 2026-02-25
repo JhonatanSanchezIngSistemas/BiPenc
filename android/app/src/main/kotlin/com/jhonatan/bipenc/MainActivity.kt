@@ -1,4 +1,4 @@
-package com.example.bipenc
+package com.jhonatan.bipenc
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

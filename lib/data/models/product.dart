@@ -1,65 +1,92 @@
+/// Modelo de Producto con nuevo esquema simplificado.
+/// sku = clave primaria, precio_base = unitario, precio_mayorista = 3+ unidades.
 class Product {
-  final String id;
-  final String descripcion;
+  final String sku;
+  final String nombre;
   final String marca;
-  final String codigoBarras;
-  final String? categoria;
-  final String? imagenUrl;
-  
-  /// Lista de presentaciones asociadas a este producto.
-  /// Ejemplo: Unidad (1), Docena (12), Caja (100).
-  final List<Presentacion> presentaciones;
-  
-  /// Flag de seguridad: Si es true, requerirá de un PIN o autorización para aplicar precios manuales.
-  final bool requiereAutorizacion;
+  final String categoria;
+  final double precioBase;
+  final double precioMayorista;
+  final String imagenUrl;
 
-  Product({
-    required this.id,
-    required this.descripcion,
-    required this.marca,
-    required this.codigoBarras,
-    this.categoria,
-    this.imagenUrl,
-    required this.presentaciones,
-    required this.requiereAutorizacion,
-  });
-}
-
-class Presentacion {
-  final String nombre; // e.g. "Unidad", "Blister x 5", "Caja x 100"
-  
-  /// Cuántas unidades mínimas contiene esta presentación. Resuelve el problema de cantidades escalables.
-  final int cantidadPorEmpaque; 
-  
-  final double precioUnitario;
-  
-  // Opcional o fijo, aplicable cuando se compran a partir de ciertas unidades (ej. 3+)
-  final double precioMayor; 
-
-  Presentacion({
+  const Product({
+    required this.sku,
     required this.nombre,
-    required this.cantidadPorEmpaque,
-    required this.precioUnitario,
-    required this.precioMayor,
+    required this.marca,
+    required this.categoria,
+    required this.precioBase,
+    this.precioMayorista = 0.0,
+    this.imagenUrl = '',
   });
 
-  /// Validación de Entidad: Garantiza que el precio al por mayor no supere el precio unitario general.
-  bool get esPrecioMayorValido => precioMayor <= precioUnitario;
-
-  /// Motor de Cálculo de BiPenc: Determina el precio según la cantidad o autorización manual.
-  double calcularPrecioTotal(int cantidad, {bool isManualPriceAuthorized = false, double? manualPrice}) {
-    // Si el precio manual fue autorizado (vía SecurityService), el motor confía en él y anula las demás reglas.
-    if (isManualPriceAuthorized && manualPrice != null) {
-      return manualPrice * cantidad;
+  /// Motor de Cálculo: precio por mayor activado a partir de 3 unidades.
+  double calcularTotal(int cantidad, {double? precioManual}) {
+    if (precioManual != null && precioManual > 0) return precioManual * cantidad;
+    if (cantidad >= 3 && tienePrecioMayorista) {
+      return precioMayorista * cantidad;
     }
-
-    // Regla de Negocio: A partir de 3 unidades se aplica el precio por mayor
-    // (siempre y cuando sea válido y haya sido configurado).
-    if (cantidad >= 3 && precioMayor > 0.0 && esPrecioMayorValido) {
-      return precioMayor * cantidad;
-    }
-    
-    // Regla base: Precio unitario multiplicando por la cantidad vendida
-    return precioUnitario * cantidad;
+    return precioBase * cantidad;
   }
+
+  bool get tienePrecioMayorista => precioMayorista > 0 && precioMayorista < precioBase;
+
+  Map<String, dynamic> toMap() => {
+    'sku': sku,
+    'nombre': nombre,
+    'marca': marca,
+    'categoria': categoria,
+    'precio_base': precioBase,
+    'precio_mayorista': precioMayorista,
+    'imagen_url': imagenUrl,
+  };
+
+  /// BLINDAJE (Fase 2 de Auditoría): 
+  /// Defensa contra datos corruptos, nulos o tipos incorrectos.
+  factory Product.fromMap(Map<String, dynamic> m) {
+    try {
+      return Product(
+        sku: (m['sku'] ?? 'BR-ERR-${DateTime.now().millisecondsSinceEpoch}').toString(),
+        nombre: (m['nombre'] ?? 'Producto sin nombre').toString(),
+        marca: (m['marca'] ?? '').toString(),
+        categoria: (m['categoria'] ?? 'General').toString(),
+        precioBase: _parseNum(m['precio_base']),
+        precioMayorista: _parseNum(m['precio_mayorista']),
+        imagenUrl: (m['imagen_url'] ?? '').toString(),
+      );
+    } catch (e) {
+      // Si todo falla, devolvemos un producto placeholder para no matar la UI
+      return Product(
+        sku: 'ERR-DATA',
+        nombre: 'Error de Datos',
+        marca: '',
+        categoria: 'ERROR',
+        precioBase: 0.0,
+      );
+    }
+  }
+
+  static double _parseNum(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
+  Product copyWith({
+    String? sku,
+    String? nombre,
+    String? marca,
+    String? categoria,
+    double? precioBase,
+    double? precioMayorista,
+    String? imagenUrl,
+  }) => Product(
+    sku: sku ?? this.sku,
+    nombre: nombre ?? this.nombre,
+    marca: marca ?? this.marca,
+    categoria: categoria ?? this.categoria,
+    precioBase: precioBase ?? this.precioBase,
+    precioMayorista: precioMayorista ?? this.precioMayorista,
+    imagenUrl: imagenUrl ?? this.imagenUrl,
+  );
 }
