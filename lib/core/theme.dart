@@ -1,70 +1,92 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Colores Base Material 3
-  static const Color primaryTeal = Color(0xFF00796B); // Colors.teal.shade700
-  static const Color backgroundWhite = Color(0xFFF8F9FA); // Blanco hueso (Anti-fatiga visual)
-  static const Color secondaryAmber = Color(0xFFE65100); // Colors.amber.shade900
+  // ── Colores Principales ──
+  static const Color primaryTeal = Colors.tealAccent;
+  static const Color backgroundDark = Color(0xFF0F0F1A);
+  static const Color surfaceDark = Color(0xFF1E1E2C);
+  static const Color cardDark = Color(0xFF1A1A1A);
+  static const Color errorRed = Colors.redAccent;
 
-  static ThemeData get lightTheme {
-    return ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.light,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primaryTeal,
-        primary: primaryTeal,
-        secondary: secondaryAmber,
-        surface: backgroundWhite,
-        onSurfaceVariant: Colors.black54,
-      ),
-      scaffoldBackgroundColor: backgroundWhite,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: primaryTeal,
-        foregroundColor: Colors.white,
-        centerTitle: true,
-        elevation: 0,
-      ),
-      cardTheme: CardThemeData(
-        color: Colors.white,
-        elevation: 2,
-        shadowColor: Colors.black.withValues(alpha: 0.1),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          backgroundColor: primaryTeal,
-          foregroundColor: Colors.white,
-        ),
-      ),
-    );
-  }
+  static ThemeData get lightTheme => darkTheme; // Forzar modo oscuro premium por defecto
 
   static ThemeData get darkTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: primaryTeal,
+        seedColor: Colors.teal,
         brightness: Brightness.dark,
-        primary: const Color(0xFF4DB6AC), // teal.shade300 para dark mode
-        secondary: const Color(0xFFFFB74D), // amber.shade300
+        primary: primaryTeal,
+        secondary: Colors.teal,
+        surface: surfaceDark,
       ),
+      scaffoldBackgroundColor: backgroundDark,
+      visualDensity: VisualDensity.adaptivePlatformDensity,
       appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF00695C), // teal.shade800
+        backgroundColor: backgroundDark,
         foregroundColor: Colors.white,
-        centerTitle: true,
+        centerTitle: false,
         elevation: 0,
+        titleTextStyle: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
+      ),
+      textTheme: const TextTheme(
+        titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+        titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        bodyLarge: TextStyle(fontSize: 15, height: 1.3),
+        bodyMedium: TextStyle(fontSize: 14, height: 1.3),
+        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
       cardTheme: CardThemeData(
-        elevation: 2,
+        color: surfaceDark,
+        elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 6),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF4DB6AC),
+          backgroundColor: primaryTeal,
           foregroundColor: Colors.black,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: const Color(0xFF11111C),
+        indicatorColor: primaryTeal.withValues(alpha: 0.2),
+        labelTextStyle: WidgetStateProperty.all(
+          const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: cardDark,
+        labelStyle: TextStyle(color: Colors.grey.shade500),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: primaryTeal, width: 1.5),
+        ),
+      ),
+    );
+  }
+
+  // Estilos estáticos para compatibilidad
+  static InputDecoration inputDecoration(String label, {IconData? icon}) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: icon != null ? Icon(icon, color: primaryTeal) : null,
     );
   }
 }

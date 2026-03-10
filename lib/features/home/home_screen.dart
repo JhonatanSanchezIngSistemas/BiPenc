@@ -1,130 +1,307 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-class HomeScreen extends StatelessWidget {
+import '../../services/local_db_service.dart';
+import '../../services/print_queue.dart';
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late Future<_HomeStats> _statsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _statsFuture = _loadStats();
+  }
+
+  Future<_HomeStats> _loadStats() async {
+    final ventas = await LocalDbService.getUltimasVentas(limit: 40);
+    final pendientesSync = await LocalDbService.obtenerVentasPendientes();
+    final printStats = await PrintQueue.obtenerEstadisticas();
+    final totalDia = ventas.fold<double>(
+      0,
+      (s, v) => s + ((v['total'] ?? 0) as num).toDouble(),
+    );
+    return _HomeStats(
+      ventasHoy: ventas.length,
+      totalHoy: totalDia,
+      pendientesSync: pendientesSync.length,
+      pendientesPrint: (printStats['pendientes'] ?? 0) as int,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Esquema de colores profesional basado en Material Design 3
-    final colorScheme = Theme.of(context).colorScheme;
-    
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      appBar: AppBar(
-        title: const Text(''),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.analytics_outlined, color: Colors.teal),
-            onPressed: () => context.push('/cierre_caja'),
-            tooltip: 'Auditoría y Cierre Z',
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF0D111B),
+              Color(0xFF132033),
+              Color(0xFF0F0F1A),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.grey),
-            onPressed: () => context.push('/settings'),
-            tooltip: 'Configuración del Negocio',
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
-            // Logo Central
-            Center(
-              child: Image.asset(
-                'assets/logo/logo_bipenc.png',
-                width: 180,
-                height: 180,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => 
-                    const Icon(Icons.inventory_2, size: 100, color: Colors.teal),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'BiPenc',
-              style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: colorScheme.primary,
-              ),
-            ),
-            Text(
-              'Sistema de Inventario & POS',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const Spacer(flex: 2),
-            
-            // Botones de Acción
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FilledButton.icon(
-                    onPressed: () => context.push('/pos'),
-                    icon: const Icon(Icons.point_of_sale, size: 28),
-                    label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16.0),
-                      child: Text('Nueva Venta', style: TextStyle(fontSize: 18)),
-                    ),
-                    style: FilledButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: () => context.push('/inventario'),
-                    icon: const Icon(Icons.inventory, size: 28),
-                    label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16.0),
-                      child: Text('Inventario', style: TextStyle(fontSize: 18)),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: colorScheme.primary, width: 2),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            const Spacer(flex: 1),
-            // Footer - Indicador de Autoría
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16.0),
-              child: Text(
-                'v1.0.0 • Desarrollado por Jhonatan',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurface.withValues(alpha: 0.5),
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ),
-          ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Modo Debug: Recolector de Basura (Imágenes) activo mediante try-finally en producto_form. Tickets cargados dinámicamente desde SharedPreferences.'),
-              backgroundColor: Colors.deepPurple,
-              duration: Duration(seconds: 4),
-            ));
-        },
-        backgroundColor: Colors.deepPurple.withValues(alpha: 0.8),
-        mini: true,
-        tooltip: 'Modo Debug (QA)',
-        child: const Icon(Icons.bug_report, color: Colors.white),
+        child: SafeArea(
+          child: RefreshIndicator(
+            onRefresh: () async {
+              setState(() {
+                _statsFuture = _loadStats();
+              });
+              await _statsFuture;
+            },
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+              children: [
+                const Text(
+                  'Panel BiPenc',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Control rápido de ventas, pedidos y operación diaria',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 16),
+                FutureBuilder<_HomeStats>(
+                  future: _statsFuture,
+                  builder: (context, snap) {
+                    final s = snap.data ??
+                        const _HomeStats(
+                          ventasHoy: 0,
+                          totalHoy: 0,
+                          pendientesSync: 0,
+                          pendientesPrint: 0,
+                        );
+                    return Column(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _MetricCard(
+                                title: 'Ventas de hoy',
+                                value: '${s.ventasHoy}',
+                                color: Colors.tealAccent,
+                                icon: Icons.receipt_long,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _MetricCard(
+                                title: 'Total hoy',
+                                value: 'S/.${s.totalHoy.toStringAsFixed(2)}',
+                                color: Colors.greenAccent,
+                                icon: Icons.attach_money,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _MetricCard(
+                                title: 'Pendiente sync',
+                                value: '${s.pendientesSync}',
+                                color: s.pendientesSync > 0
+                                    ? Colors.orangeAccent
+                                    : Colors.blueAccent,
+                                icon: Icons.sync_problem,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _MetricCard(
+                                title: 'Cola impresión',
+                                value: '${s.pendientesPrint}',
+                                color: s.pendientesPrint > 0
+                                    ? Colors.amber
+                                    : Colors.purpleAccent,
+                                icon: Icons.print,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                const _SectionTitle('Acciones Rápidas'),
+                const SizedBox(height: 10),
+                _ActionTile(
+                  title: 'Nueva Venta',
+                  subtitle: 'Abrir POS y cobrar',
+                  icon: Icons.point_of_sale,
+                  color: Colors.teal,
+                  onTap: () => context.go('/pos'),
+                ),
+                _ActionTile(
+                  title: 'Listas Escolares',
+                  subtitle: 'Llegadas, pagos y prioridad',
+                  icon: Icons.list_alt,
+                  color: Colors.orangeAccent,
+                  onTap: () => context.go('/pedidos'),
+                ),
+                _ActionTile(
+                  title: 'Inventario',
+                  subtitle: 'Crear y editar productos',
+                  icon: Icons.inventory_2,
+                  color: Colors.cyanAccent,
+                  onTap: () => context.go('/inventario'),
+                ),
+                _ActionTile(
+                  title: 'Boletas y Reportes',
+                  subtitle: 'Reimpresión, anulación, caja',
+                  icon: Icons.analytics_outlined,
+                  color: Colors.greenAccent,
+                  onTap: () => context.go('/config_dashboard'),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: Colors.white70,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.3,
+      ),
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final Color color;
+  final IconData icon;
+
+  const _MetricCard({
+    required this.title,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: const Color(0xFF151C2C),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ActionTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: const Color(0xFF141A29),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: color),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white60)),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white30),
+      ),
+    );
+  }
+}
+
+class _HomeStats {
+  final int ventasHoy;
+  final double totalHoy;
+  final int pendientesSync;
+  final int pendientesPrint;
+
+  const _HomeStats({
+    required this.ventasHoy,
+    required this.totalHoy,
+    required this.pendientesSync,
+    required this.pendientesPrint,
+  });
 }

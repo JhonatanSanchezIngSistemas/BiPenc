@@ -1,0 +1,144 @@
+# 🔍 Diagnóstico Completo de BiPenc — Estado, Flujo, Pendientes y Plan de Mejora
+
+---
+
+## 📱 Flujo de la App (Simple)
+
+```mermaid
+graph TD
+    A["🔐 Login"] -->|Email + PIN| B["🏠 Home"]
+    A -->|Biometría rápida| B
+    A -->|Sin Internet → PIN Admin| B
+    B --> C["📦 Inventario"]
+    B --> D["🛒 POS / Venta"]
+    B --> E["📋 Pedidos con Foto"]
+    B --> F["📊 Cierre de Caja"]
+    B --> G["⚙️ Settings"]
+
+    C --> C1["Ver productos"]
+    C --> C2["Agregar/Editar producto"]
+    C --> C3["Escanear código de barras"]
+    C --> C4["Quick Add rápido"]
+
+    D --> D1["Buscar producto"]
+    D --> D2["Escanear código"]
+    D --> D3["Agregar al carrito"]
+    D3 --> D4["Editar precios/cantidades"]
+    D4 --> D5["Seleccionar Boleta/Factura"]
+    D5 --> D6["🖨️ Imprimir ticket Bluetooth"]
+    D5 --> D7["Guardar venta local + cola sync"]
+
+    E --> E1["Crear lista de pedido"]
+    E1 --> E2["Tomar fotos in situ"]
+    E2 --> E3["Guardar en Supabase Storage"]
+
+    F --> F1["Cuadre diario"]
+    F1 --> F2["Sync batch ventas → Supabase"]
+    F1 --> F3["PDF + WhatsApp"]
+
+    G --> G1["Impresora Bluetooth"]
+    G --> G2["Config Dashboard"]
+```
+
+**En resumen**: Login → Home → (Inventario | POS | Pedidos | Cierre) → Todo funciona offline-first → Al tener WiFi, sincroniza con Supabase.
+
+---
+
+## ✅ Lo que YA FUNCIONA (23 Fases completadas)
+
+| # | Módulo | Estado |
+|---|--------|--------|
+| ✅ | Login con biometría opcional + modo offline | Estable |
+| ✅ | Inventario con escaneo de códigos | Estable |
+| ✅ | POS con multi-carrito y precios dinámicos | Estable |
+| ✅ | Impresión Bluetooth (PT-210) | Estable |
+| ✅ | Cierre de Caja Z + PDF + WhatsApp | Estable |
+| ✅ | Pedidos con Fotos (Listas con Foto) | Estable |
+| ✅ | Correlativo atómico de ventas (Supabase RPC) | Estable |
+| ✅ | Arquitectura offline-first (SQLite V5) | Estable |
+| ✅ | IA Visual para recorte de fotos (ML Kit) | Estable |
+| ✅ | Tema Premium oscuro (OLED) | Estable |
+
+---
+
+## ❌ Lo que FALTA desarrollar
+
+### 🔴 Pendientes Críticos (del blueprint_v2 + task.md)
+
+| # | Pendiente | Origen | Impacto |
+|---|-----------|--------|---------|
+| 1 | **Permisos Bluetooth Android 14** | Fase 21 | No se puede imprimir en Android 14+ sin solicitar permisos |
+| 2 | **Ticket ESC/POS comercial** | Fase 21 | El ticket no tiene RUC, columnas alineadas ni resumen financiero |
+| 3 | **Sync bidireccional** (local ↔ nube) | Blueprint v2 | Si borras en local no se borra en Supabase (y viceversa) |
+| 4 | **Descuento automático de stock** | Blueprint v2 | Las ventas no descuentan inventario automáticamente |
+| 5 | **Limpieza de datos de prueba** | BETA_STATUS | El inventario tiene datos ficticios, hay que limpiar antes de Go-Live |
+| 6 | **Manual de mantenimiento** | Fase 9.2 | Sin documentación para futuros desarrolladores |
+| 7 | **Integración SUNAT real (PSE)** | BETA_STATUS | Estructura lista pero sin conexión a facturación electrónica |
+
+### 🟡 Puntos de Atención Técnica
+
+| # | Tema | Detalle |
+|---|------|---------|
+| 1 | **2 esquemas coexistiendo** | Tabla `productos` (legado, 16 filas) vs `products` (OCP nuevo, 0 filas) — transición incompleta |
+| 2 | **RLS deshabilitado** | `logs_precios`, `marcas_maestras`, `unidades_medida`, `afectacion_igv` sin políticas de seguridad |
+| 3 | **Tests limitados** | Solo 6 tests unitarios, sin tests de integración |
+| 4 | **Archivos .md redundantes** | 5 documentos .md en raíz que podrían consolidarse |
+| 5 | **`flutter analyze` colgándose** | Posible issue con el SDK o dependencias desactualizadas |
+
+---
+
+## ❓ Preguntas para Evaluar el Estado Actual
+
+Necesito que respondas estas preguntas para saber exactamente dónde estamos y qué priorizar:
+
+### Sobre el dispositivo y uso real
+1. **¿Ya estás usando la app en la tienda real?** ¿O todavía estamos en pruebas?
+2. **¿Has logrado imprimir tickets reales con la PT-210?** ¿Te salen bien los formatos?
+3. **¿En qué versión de Android está tu Samsung A36?** (Si es Android 14, el tema de permisos Bluetooth es urgente)
+
+### Sobre los datos
+4. **¿Los 16 productos en Supabase son reales o de prueba?** ¿Ya cargaste tu catálogo real?
+5. **¿Has hecho alguna venta real?** (La tabla `ventas` tiene 0 filas)
+
+### Sobre las tablas nuevas (OCP)
+6. **¿Recuerdas las tablas nuevas (`products`, `brands`, `categories`, `product_presentations`)?** Están vacías (0 filas). ¿Quieres migrar a este nuevo esquema o seguimos con el legado `productos`?
+
+### Sobre errores
+7. **¿Qué errores has visto últimamente?** ¿Crashes, pantallas en blanco, la app se cierra sola?
+8. **¿La app compila y corre bien en tu celular actualmente?** ¿O hay algún error al ejecutar `flutter run`?
+
+### Sobre prioridades de negocio
+9. **¿Qué es más urgente para ti ahora?**
+   - a) Que el ticket salga bonito y profesional
+   - b) Que el inventario se descuente automáticamente al vender
+   - c) Que funcione la facturación SUNAT real
+   - d) Limpiar datos y preparar para producción
+   - e) Otra cosa
+
+10. **¿Quieres que limpie los archivos .md redundantes** y deje solo el README actualizado?
+
+---
+
+## 📊 Sugerencia de Orden de Trabajo
+
+Basado en mi análisis, este sería el orden ideal de prioridades:
+
+```mermaid
+graph LR
+    A["1️⃣ Compilación\nLimpia"] --> B["2️⃣ Permisos\nBluetooth"]
+    B --> C["3️⃣ Ticket\nComercial"]
+    C --> D["4️⃣ Stock\nAutomático"]
+    D --> E["5️⃣ Limpieza\nDatos"]
+    E --> F["6️⃣ Sync\nBidireccional"]
+    F --> G["7️⃣ Go-Live\n🚀"]
+```
+
+| Paso | Qué | Por qué primero |
+|------|-----|-----------------|
+| **1** | Arreglar compilación (`flutter analyze` limpio) | Base sólida para todo lo demás |
+| **2** | Permisos Bluetooth Android 14 (Fase 21.1) | Sin esto, no se imprime en dispositivos modernos |
+| **3** | Ticket ESC/POS profesional (Fase 21.2) | Lo que el cliente ve al pagar |
+| **4** | Descuento automático de stock | Necesario para control real de inventario |
+| **5** | Limpieza de datos + carga real | Preparar para primer día de producción |
+| **6** | Sync bidireccional | Consistencia local ↔ nube |
+| **7** | Go-Live 🚀 | Lanzamiento en la tienda |

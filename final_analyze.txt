@@ -1,0 +1,14 @@
+Analyzing BiPenc...                                             
+
+   info • Unnecessary 'const' keyword • lib/features/pedidos/order_list_screen.dart:724:19 • unnecessary_const
+   info • Unnecessary 'const' keyword • lib/features/pedidos/order_list_screen.dart:725:19 • unnecessary_const
+   info • Unnecessary 'const' keyword • lib/features/pedidos/order_list_screen.dart:726:19 • unnecessary_const
+   info • Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check • lib/features/reports/cierre_caja_screen.dart:180:42 • use_build_context_synchronously
+   info • Unnecessary braces in a string interpolation • lib/helpers/conversion_helper.dart:107:47 • unnecessary_brace_in_string_interps
+   info • The import of 'package:image_picker/image_picker.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter_image_compress/flutter_image_compress.dart' • lib/services/image_processing_service.dart:8:8 • unnecessary_import
+  error • Invalid constant value • lib/services/image_processing_service.dart:154:19 • invalid_constant
+  error • Invalid constant value • lib/services/image_processing_service.dart:155:22 • invalid_constant
+  error • Invalid constant value • lib/services/image_processing_service.dart:156:19 • invalid_constant
+   info • The import of 'package:bipenc/data/models/producto.dart' is unnecessary because all of the used elements are also provided by the import of 'package:bipenc/features/pos/pos_provider.dart' • lib/services/print_service.dart:11:8 • unnecessary_import
+
+10 issues found. (ran in 1.4s)

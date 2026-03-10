@@ -1,0 +1,99 @@
+Analyzing BiPenc...                                             
+
+   info • Unnecessary braces in a string interpolation • lib/data/models/producto.dart:315:33 • unnecessary_brace_in_string_interps
+   info • Use interpolation to compose strings and values • lib/data/models/producto.dart:315:66 • prefer_interpolation_to_compose_strings
+   info • Use 'const' with the constructor to improve performance • lib/features/inventario/inventario_screen.dart:273:12 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/inventario/inventario_screen.dart:274:14 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/inventario/inventario_screen.dart:276:16 • prefer_const_constructors
+   info • Use 'const' literals as arguments to constructors of '@immutable' classes • lib/features/inventario/inventario_screen.dart:278:21 • prefer_const_literals_to_create_immutables
+   info • Unnecessary braces in a string interpolation • lib/features/inventario/producto_form_screen.dart:293:21 • unnecessary_brace_in_string_interps
+   info • Unnecessary braces in a string interpolation • lib/features/inventario/producto_form_screen.dart:301:21 • unnecessary_brace_in_string_interps
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/features/inventario/producto_form_screen.dart:496:15 • deprecated_member_use
+warning • The value of the field '_picker' isn't used • lib/features/pedidos/order_list_screen.dart:19:9 • unused_field
+   info • The private field _ordenes could be 'final' • lib/features/pedidos/order_list_screen.dart:21:19 • prefer_final_fields
+warning • The value of the field '_ordenes' isn't used • lib/features/pedidos/order_list_screen.dart:21:19 • unused_field
+   info • The private field _isLoading could be 'final' • lib/features/pedidos/order_list_screen.dart:22:8 • prefer_final_fields
+warning • The value of the field '_isLoading' isn't used • lib/features/pedidos/order_list_screen.dart:22:8 • unused_field
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:127:27 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:258:19 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:266:19 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:280:21 • prefer_const_constructors
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/pedidos/order_list_screen.dart:419:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/pedidos/order_list_screen.dart:442:39 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/pedidos/order_list_screen.dart:474:41 • deprecated_member_use
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:559:19 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:725:13 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:726:22 • prefer_const_constructors
+   info • Use 'const' literals as arguments to constructors of '@immutable' classes • lib/features/pedidos/order_list_screen.dart:727:27 • prefer_const_literals_to_create_immutables
+   info • Use 'const' with the constructor to improve performance • lib/features/pedidos/order_list_screen.dart:728:19 • prefer_const_constructors
+   info • The import of 'package:bipenc/data/models/producto.dart' is unnecessary because all of the used elements are also provided by the import of 'package:bipenc/features/pos/pos_provider.dart' • lib/features/pos/pos_screen.dart:5:8 • unnecessary_import
+warning • Unused import: 'package:bipenc/services/supabase_service.dart' • lib/features/pos/pos_screen.dart:10:8 • unused_import
+warning • Unused import: 'dart:convert' • lib/features/pos/pos_screen.dart:14:8 • unused_import
+warning • Unused import: '../../services/local_db_service.dart' • lib/features/pos/pos_screen.dart:17:8 • unused_import
+   info • Don't use 'BuildContext's across async gaps • lib/features/pos/pos_screen.dart:91:37 • use_build_context_synchronously
+   info • Use 'const' with the constructor to improve performance • lib/features/pos/pos_screen.dart:193:31 • prefer_const_constructors
+   info • Don't use 'BuildContext's across async gaps • lib/features/pos/pos_screen.dart:205:60 • use_build_context_synchronously
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/pos/pos_screen.dart:221:65 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/pos/pos_screen.dart:832:59 • deprecated_member_use
+   info • Statements in an if should be enclosed in a block • lib/features/reports/cierre_caja_screen.dart:65:48 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/reports/cierre_caja_screen.dart:66:53 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/reports/cierre_caja_screen.dart:67:52 • curly_braces_in_flow_control_structures
+   info • Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check • lib/features/reports/cierre_caja_screen.dart:175:42 • use_build_context_synchronously
+warning • Unused import: '../../widgets/conectividad_indicador.dart' • lib/features/settings/config_dashboard_screen.dart:6:8 • unused_import
+warning • Unused import: 'dart:async' • lib/features/settings/config_dashboard_screen.dart:9:8 • unused_import
+   info • The import of '../../data/models/producto.dart' is unnecessary because all of the used elements are also provided by the import of '../pos/pos_provider.dart' • lib/features/settings/config_dashboard_screen.dart:12:8 • unnecessary_import
+warning • Duplicate import • lib/features/settings/config_dashboard_screen.dart:13:8 • duplicate_import
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/config_dashboard_screen.dart:92:42 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/config_dashboard_screen.dart:134:22 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/config_dashboard_screen.dart:135:41 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/config_dashboard_screen.dart:172:66 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/config_dashboard_screen.dart:172:98 • deprecated_member_use
+   info • Don't use 'BuildContext's across async gaps • lib/features/settings/config_dashboard_screen.dart:213:56 • use_build_context_synchronously
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/config_dashboard_screen.dart:249:50 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/printer_config_screen.dart:148:55 • deprecated_member_use
+   info • Unnecessary use of 'toList' in a spread • lib/features/settings/printer_config_screen.dart:164:22 • unnecessary_to_list_in_spreads
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/printer_config_screen.dart:212:46 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/settings/printer_config_screen.dart:231:33 • deprecated_member_use
+warning • Unused import: 'package:go_router/go_router.dart' • lib/features/settings/settings_screen.dart:2:8 • unused_import
+warning • Unused import: 'package:bipenc/data/models/business_config.dart' • lib/features/settings/settings_screen.dart:9:8 • unused_import
+warning • Unused import: 'package:package_info_plus/package_info_plus.dart' • lib/features/settings/settings_screen.dart:11:8 • unused_import
+   info • Use 'const' with the constructor to improve performance • lib/features/settings/settings_screen.dart:103:54 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/settings/settings_screen.dart:103:72 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/settings/settings_screen.dart:108:52 • prefer_const_constructors
+   info • Use 'const' with the constructor to improve performance • lib/features/settings/settings_screen.dart:108:70 • prefer_const_constructors
+   info • 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre • lib/features/settings/settings_screen.dart:263:17 • deprecated_member_use
+   info • Unnecessary braces in a string interpolation • lib/helpers/conversion_helper.dart:107:47 • unnecessary_brace_in_string_interps
+   info • 'onError' is deprecated and shouldn't be used. Use runZonedGuarded instead • lib/main.dart:147:5 • deprecated_member_use
+warning • Unused import: '../data/models/producto.dart' • lib/services/caja_service.dart:1:8 • unused_import
+   info • The import of 'package:camera/camera.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter_image_compress/flutter_image_compress.dart' • lib/services/image_processing_service.dart:7:8 • unnecessary_import
+   info • Use 'const' with the constructor to improve performance • lib/services/image_processing_service.dart:153:7 • prefer_const_constructors
+warning • The value of the local variable 'totalUnidades' isn't used • lib/services/local_db_service.dart:353:13 • unused_local_variable
+warning • Unused import: 'package:image/image.dart' • lib/services/ml_kit_service.dart:3:8 • unused_import
+warning • Unused import: 'package:path_provider/path_provider.dart' • lib/services/ml_kit_service.dart:4:8 • unused_import
+   info • Don't invoke 'print' in production code • lib/services/precio_aprobacion_service.dart:49:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/services/precio_aprobacion_service.dart:65:7 • avoid_print
+   info • Don't invoke 'print' in production code • lib/services/precio_aprobacion_service.dart:81:7 • avoid_print
+warning • Unused import: 'package:flutter/foundation.dart' • lib/services/print_queue.dart:1:8 • unused_import
+warning • Unused import: 'package:flutter/services.dart' • lib/services/print_service.dart:4:8 • unused_import
+warning • Unused import: 'package:package_info_plus/package_info_plus.dart' • lib/services/print_service.dart:10:8 • unused_import
+   info • The import of 'package:bipenc/data/models/producto.dart' is unnecessary because all of the used elements are also provided by the import of 'package:bipenc/features/pos/pos_provider.dart' • lib/services/print_service.dart:13:8 • unnecessary_import
+warning • The left operand can't be null, so the right operand is never executed • lib/services/print_service.dart:379:26 • dead_null_aware_expression
+   info • Unnecessary braces in a string interpolation • lib/services/supabase_service.dart:723:46 • unnecessary_brace_in_string_interps
+   info • Unnecessary braces in a string interpolation • lib/services/supabase_service.dart:725:45 • unnecessary_brace_in_string_interps
+   info • Unnecessary braces in a string interpolation • lib/services/supabase_service.dart:727:45 • unnecessary_brace_in_string_interps
+   info • Unnecessary braces in a string interpolation • lib/services/supabase_service.dart:729:46 • unnecessary_brace_in_string_interps
+warning • Unused import: 'package:flutter/foundation.dart' • lib/services/sync_service.dart:2:8 • unused_import
+warning • The value of the field '_maxRetries' isn't used • lib/services/sync_service.dart:28:20 • unused_field
+   info • Invalid use of a private type in a public API • lib/utils/fiscal_utils.dart:10:10 • library_private_types_in_public_api
+warning • The value of the local variable 'response' isn't used • lib/widgets/conectividad_indicador.dart:36:13 • unused_local_variable
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/widgets/modals/checklist_modal.dart:54:104 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/widgets/modals/checklist_modal.dart:76:45 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/widgets/modals/checklist_modal.dart:79:121 • deprecated_member_use
+   info • Use a 'SizedBox' to add whitespace to a layout • lib/widgets/scanner_modal.dart:70:13 • sized_box_for_whitespace
+   info • The imported package 'path_provider_platform_interface' isn't a dependency of the importing package • test/image_processing_stress_test.dart:5:8 • depend_on_referenced_packages
+   info • The imported package 'plugin_platform_interface' isn't a dependency of the importing package • test/image_processing_stress_test.dart:6:8 • depend_on_referenced_packages
+   info • Use 'const' for final variables initialized to a constant value • test/image_processing_stress_test.dart:30:7 • prefer_const_declarations
+   info • Use 'const' for final variables initialized to a constant value • test/image_processing_stress_test.dart:63:7 • prefer_const_declarations
+   info • The import of 'package:bipenc/data/models/producto.dart' is unnecessary because all of the used elements are also provided by the import of 'package:bipenc/features/pos/pos_provider.dart' • test/pos_provider_test.dart:3:8 • unnecessary_import
+
+95 issues found. (ran in 1.3s)

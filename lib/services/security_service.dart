@@ -1,50 +1,66 @@
-import 'dart:convert';
-import 'package:crypto/crypto.dart';
+import 'package:bcrypt/bcrypt.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SecurityService {
   static const String _adminKey = 'admin_password_hash';
   
-  // Hash por defecto para "admin123" usando SHA-256
-  // 240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9
-  static const String _defaultAdminHash = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
+  /// Hash BCRYPT bootstrap (rounds=12).
+  /// Debe cambiarse desde ajustes en el primer uso.
+  static const String _defaultAdminHash = 
+    r'$2b$12$R9h7cIPz0gi.URNNF3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jKMUi';
 
   /// Inicializa el servicio, grabando el hash por defecto si es la primera vez que se abre la app.
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     if (!prefs.containsKey(_adminKey)) {
       await prefs.setString(_adminKey, _defaultAdminHash);
+      debugPrint('[SecurityService] Inicializado con admin por defecto');
     }
   }
 
   /// Valida si el PIN/Contraseña suministrado coincide con la clave de administrador.
-  /// Lo hace convirtiendo la entrada a SHA-256 y comparándola con el hash en disco.
+  /// Usa BCrypt para comparación segura.
   Future<bool> validarAccesoAdministrador(String password) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final storedHash = prefs.getString(_adminKey) ?? _defaultAdminHash;
       
-      // Convertimos el password entrante a bytes y luego aplicamos el Hash SHA-256
-      final bytes = utf8.encode(password);
-      final derivedHash = sha256.convert(bytes).toString();
+      // BCrypt.checkpw es seguro contra timing attacks
+      final isMatch = BCrypt.checkpw(password, storedHash);
       
-      return storedHash == derivedHash;
+      if (!isMatch) {
+        debugPrint('[SecurityService] Acceso rechazado: password incorrecto');
+      }
+      
+      return isMatch;
     } catch (e) {
-      debugPrint('Excepción al validar credenciales: $e');
+      debugPrint('[SecurityService] Error validando credenciales: $e');
       return false;
     }
   }
 
-  /// Actualiza la contraseña generando un nuevo Hash y sobreescribiendo el anterior.
+  /// Actualiza la contraseña generando un nuevo hash BCRYPT.
+  /// Usa 12 rounds (default) para balance entre seguridad y performance.
   Future<bool> cambiarClaveAdministrador(String nuevaClave) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final bytes = utf8.encode(nuevaClave);
-      final newHash = sha256.convert(bytes).toString();
-      return await prefs.setString(_adminKey, newHash);
+      
+      // Generar salt (default rounds = ~250ms en mobile)
+      final salt = BCrypt.gensalt();
+      
+      // Hash con BCrypt
+      final newHash = BCrypt.hashpw(nuevaClave, salt);
+      
+      final success = await prefs.setString(_adminKey, newHash);
+      
+      if (success) {
+        debugPrint('[SecurityService] Clave actualizada correctamente');
+      }
+      
+      return success;
     } catch (e) {
-      debugPrint('Error al cambiar clave en SecurityService: $e');
+      debugPrint('[SecurityService] Error cambiando clave: $e');
       return false;
     }
   }

@@ -4,7 +4,7 @@ import '../services/session_manager.dart';
 
 /// Constitución BiPenc — Artículo 1
 /// Widget que envuelve la app y muestra una pantalla de bloqueo 
-/// si SessionManager detecta inactividad > 60 min.
+/// si SessionManager detecta inactividad > 15 min.
 class SessionGuard extends StatelessWidget {
   final Widget child;
 
@@ -29,9 +29,28 @@ class SessionGuard extends StatelessWidget {
   }
 }
 
-class _LockScreen extends StatelessWidget {
+class _LockScreen extends StatefulWidget {
   final SessionManager session;
   const _LockScreen({required this.session});
+
+  @override
+  State<_LockScreen> createState() => _LockScreenState();
+}
+
+class _LockScreenState extends State<_LockScreen> {
+  bool _unlocking = false;
+
+  Future<void> _onUnlockPressed() async {
+    if (_unlocking) return;
+    setState(() => _unlocking = true);
+    final ok = await widget.session.desbloquear();
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Autenticación fallida')),
+      );
+    }
+    if (mounted) setState(() => _unlocking = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,16 +80,11 @@ class _LockScreen extends StatelessWidget {
               width: 200,
               height: 50,
               child: FilledButton.icon(
-                onPressed: () async {
-                  final ok = await session.desbloquear();
-                  if (!ok && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Autenticación fallida')),
-                    );
-                  }
-                },
-                icon: Icon(session.biometricoDisponible ? Icons.fingerprint : Icons.lock_open),
-                label: Text(session.biometricoDisponible ? 'USAR HUELLA' : 'DESBLOQUEAR'),
+                onPressed: _unlocking ? null : _onUnlockPressed,
+                icon: Icon(widget.session.biometricoDisponible ? Icons.fingerprint : Icons.lock_open),
+                label: Text(_unlocking
+                    ? 'VERIFICANDO...'
+                    : (widget.session.biometricoDisponible ? 'USAR HUELLA' : 'DESBLOQUEAR')),
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.teal,
                   foregroundColor: Colors.black,

@@ -2,13 +2,15 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:bipenc/services/encryption_service.dart';
 
 /// Constitución BiPenc — Artículo 1:
-/// Gestiona el bloqueo de sesión por inactividad de 60 minutos.
-/// La huella solo se pide al (a) abrir la app en frío o (b) tras 60 min sin uso.
+/// Gestión del bloqueo de sesión por inactividad de 15 minutos.
+/// La huella solo se pide al (a) abrir la app en frío o (b) tras 15 min sin uso.
 class SessionManager extends ChangeNotifier {
   static const _kLastActivityKey = 'last_activity_ts';
-  static const _inactivityMinutes = 60;
+  // cambió 60→15 tras auditoría de seguridad
+  static const _inactivityMinutes = 15;
 
   final LocalAuthentication _auth = LocalAuthentication();
   Timer? _inactivityTimer;
@@ -23,6 +25,12 @@ class SessionManager extends ChangeNotifier {
   }
 
   Future<void> _init() async {
+    // Inicializar encriptación para proteger datos de sesión
+    try {
+      await EncryptionService().init();
+    } catch (e) {
+      debugPrint('[SessionManager] ⚠️ Encryption init fallback: $e');
+    }
     _biometricoDisponible = await _auth.canCheckBiometrics;
     await _checkInactivity();
     registrarActividad();
@@ -40,20 +48,53 @@ class SessionManager extends ChangeNotifier {
 
   Future<void> _guardarTimestamp() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_kLastActivityKey, DateTime.now().millisecondsSinceEpoch);
+    final ts = DateTime.now().millisecondsSinceEpoch.toString();
+    try {
+      if (EncryptionService().isInitialized) {
+        final encrypted = EncryptionService().encriptar(ts);
+        await prefs.setString(_kLastActivityKey, encrypted);
+      } else {
+        await prefs.setString(_kLastActivityKey, ts);
+      }
+    } catch (e) {
+      // Fallback sin encriptar si hay error
+      await prefs.setString(_kLastActivityKey, ts);
+    }
   }
 
   /// Verifica si ya pasaron 60 min desde el último uso (ej: app matada y reabierta).
   Future<void> _checkInactivity() async {
     final prefs = await SharedPreferences.getInstance();
-    final lastTs = prefs.getInt(_kLastActivityKey);
-    if (lastTs == null) {
-      _bloqueado = true;
-      notifyListeners();
+    final raw = prefs.getString(_kLastActivityKey);
+    // Compatibilidad: intentar con int antiguo si string no existe
+    if (raw == null) {
+      final legacyTs = prefs.getInt(_kLastActivityKey);
+      if (legacyTs == null) {
+        _bloqueado = true;
+        notifyListeners();
+        return;
+      }
+      final elapsed = DateTime.now().millisecondsSinceEpoch - legacyTs;
+      if (elapsed >= _inactivityMinutes * 60 * 1000) {
+        _bloqueado = true;
+        notifyListeners();
+      }
       return;
     }
-    final elapsed = DateTime.now().millisecondsSinceEpoch - lastTs;
-    if (elapsed >= _inactivityMinutes * 60 * 1000) {
+    try {
+      int lastTs;
+      if (EncryptionService().isInitialized && raw.contains('.')) {
+        lastTs = int.parse(EncryptionService().desencriptar(raw));
+      } else {
+        lastTs = int.parse(raw);
+      }
+      final elapsed = DateTime.now().millisecondsSinceEpoch - lastTs;
+      if (elapsed >= _inactivityMinutes * 60 * 1000) {
+        _bloqueado = true;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[SessionManager] Error decrypting timestamp: $e');
       _bloqueado = true;
       notifyListeners();
     }
@@ -65,32 +106,33 @@ class SessionManager extends ChangeNotifier {
     debugPrint('[SessionManager] Bloqueado por inactividad de ${_inactivityMinutes}min');
   }
 
-  /// Intenta desbloquear con huella digital.
-  /// Si el sensor no está disponible, desbloquea directo.
+  /// Intenta desbloquear con huella digital (Solo si usuario presiona botón).
+  /// No se llama automáticamente. SessionGuard maneja el UI.
+  /// Esta es una operación A DEMANDA, no automática.
   Future<bool> desbloquear() async {
     if (!_biometricoDisponible) {
       _bloqueado = false;
       registrarActividad();
       notifyListeners();
+      debugPrint('[SessionManager] Desbloqueado sin biometría (no disponible)');
       return true;
     }
     try {
       final ok = await _auth.authenticate(
         localizedReason: 'Identifícate para continuar en BiPenc',
-        options: const AuthenticationOptions(biometricOnly: false),
+        options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
       );
       if (ok) {
         _bloqueado = false;
         registrarActividad();
         notifyListeners();
+        debugPrint('[SessionManager] Desbloqueado correctamente');
       }
       return ok;
     } catch (e) {
-      // Cualquier error de sensor → desbloquear sin huella
-      _bloqueado = false;
-      registrarActividad();
-      notifyListeners();
-      return true;
+      // Error técnico biométrico: mantener bloqueado por seguridad.
+      debugPrint('[SessionManager] Error biométrico: $e');
+      return false;
     }
   }
 
@@ -98,5 +140,22 @@ class SessionManager extends ChangeNotifier {
   void dispose() {
     _inactivityTimer?.cancel();
     super.dispose();
+  }
+
+  /// Cierra la sesión manualmente (Logout)
+  Future<void> cerrarSesion() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLastActivityKey);
+    _bloqueado = true;
+    _inactivityTimer?.cancel();
+    notifyListeners();
+  }
+
+  /// Marca la sesión como ya autenticada (ej. login biométrico exitoso en LoginPage)
+  /// para evitar doble prompt al entrar a rutas protegidas por SessionGuard.
+  void marcarSesionAutenticada() {
+    _bloqueado = false;
+    registrarActividad();
+    notifyListeners();
   }
 }

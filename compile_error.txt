@@ -1,3 +1,0 @@
-Could not find a command named "compile".
-
-Run 'flutter -h' (or 'flutter <command> -h') for available flutter commands and options.

@@ -14,42 +14,61 @@ dependencies:
   # Estado y Rutas
   provider: ^6.1.2
   go_router: ^14.6.2
+  path: ^1.9.0
+  url_launcher: ^6.3.1
+  share_plus: ^10.1.4
+  image_picker: ^1.1.2
 
   # Cámara
   camera: ^0.11.0+2
+  mobile_scanner: ^7.2.0
   path_provider: ^2.1.4
 
   # Imagen — recorte local de fondo
   image: 4.2.0
   flutter_image_compress: ^2.3.0
 
-  # Impresión Térmica (Plus Edition for compatibility)
+  # Impresión Térmica
   print_bluetooth_thermal: ^1.1.7
-  esc_pos_utils_plus: 2.0.3
+  esc_pos_utils_plus: ^2.0.3
+  flutter_blue_plus: ^1.31.0
+  barcode_widget: ^2.0.3
+  qr_flutter: ^4.1.0
   pdf: ^3.11.1
 
   # Backend / Persistencia
   supabase_flutter: ^2.9.0
-  sqflite_sqlcipher: 3.4.0
+  sqflite: ^2.3.3+1
   connectivity_plus: 6.1.3
   permission_handler: ^11.3.1
   shared_preferences: ^2.3.3
   cached_network_image: ^3.4.1
   logger: ^2.4.0
   crypto: ^3.0.6
+  equatable: ^2.0.7
+  intl: ^0.20.2
 
   # Red
   http: ^1.2.2
 
   # Autenticación Biométrica
-  local_auth: 2.3.0
+  local_auth: ^2.3.0
   package_info_plus: ^8.1.2
+
+  # Seguridad
+  flutter_dotenv: ^5.0.2
+  bcrypt: ^1.2.0
+  encrypt: ^5.0.3
+  flutter_secure_storage: ^9.2.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.4
+  path_provider_platform_interface: ^2.1.2
+  plugin_platform_interface: ^2.1.8
+  sqflite_common_ffi: ^2.3.4
 
 flutter_launcher_icons:
   android: "launcher_icon"
@@ -63,3 +82,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/logo/
+    - .env

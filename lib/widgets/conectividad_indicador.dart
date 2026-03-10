@@ -33,11 +33,14 @@ class _ConectividadIndicadorState extends State<ConectividadIndicador> {
     bool reachable = false;
     try {
       // Intento de ping ligero a Supabase
-      final response = await Supabase.instance.client
+      await Supabase.instance.client
           .from('productos')
           .select('sku')
           .limit(1)
           .timeout(const Duration(seconds: 5));
+      reachable = true;
+    } on PostgrestException {
+      // El servidor respondió (aunque RLS niegue consulta).
       reachable = true;
     } catch (_) {
       reachable = false;
@@ -63,7 +66,7 @@ class _ConectividadIndicadorState extends State<ConectividadIndicador> {
           boxShadow: [
             BoxShadow(
               color: (_isSupabaseReachable ? Colors.greenAccent : Colors.redAccent)
-                  .withOpacity(0.6),
+                  .withValues(alpha: 0.6),
               blurRadius: 8,
               spreadRadius: 2,
             ),

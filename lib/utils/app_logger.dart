@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 /// Logger centralizado de BiPenc.
 /// En modo release no emite nada. En debug imprime con nivel y emoji.
+/// Soporta 5 niveles: debug, info, warning, error, critical
 class AppLogger {
   AppLogger._();
 
@@ -23,10 +24,56 @@ class AppLogger {
     }
   }
 
-  static void error(String message, {String? tag, Object? error}) {
+  static void error(
+    String message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
     if (kDebugMode) {
       _log('🔴 ERROR', tag, message);
-      if (error != null) debugPrint('   ↳ $error');
+      if (error != null) debugPrint('   ↳ Error: $error');
+      if (stackTrace != null) {
+        debugPrint('   ↳ Stack:');
+        debugPrint(stackTrace.toString());
+      }
+    }
+  }
+
+  static void warn(
+    String message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    // Alias para warning con soporte a error/stackTrace
+    warning(message, tag: tag);
+    if (error != null) {
+      if (kDebugMode) {
+        debugPrint('   ↳ Error: $error');
+        if (stackTrace != null) debugPrint(stackTrace.toString());
+      }
+    }
+  }
+
+  /// Nivel CRÍTICO: Para errores no manejados que pueden causar crash
+  static void critical(
+    String message, {
+    String? tag,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (kDebugMode) {
+      _log('🔴🔴 CRITICAL', tag, message);
+      if (error != null) debugPrint('   ↳ Error: $error');
+      if (stackTrace != null) {
+        debugPrint('   ↳ Stack Trace:');
+        final lines = stackTrace.toString().split('\n');
+        for (final line in lines.take(15)) {
+          // Primeras 15 líneas del stack
+          if (line.isNotEmpty) debugPrint('      $line');
+        }
+      }
     }
   }
 

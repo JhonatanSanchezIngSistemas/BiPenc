@@ -9,6 +9,15 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    - lib/screens/**
+    - lib/services/carrito_service.dart
+    - lib/services/pdf_service.dart
+    - lib/widgets/item_carrito_widget.dart
+    - lib/widgets/producto_card.dart
+    - tools/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

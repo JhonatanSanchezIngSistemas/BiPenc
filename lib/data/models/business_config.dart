@@ -4,6 +4,7 @@ class BusinessConfig {
   final String direccion;
   final String telefono;
   final String mensajeDespedida;
+  final String serie;
 
   BusinessConfig({
     required this.nombre,
@@ -11,6 +12,7 @@ class BusinessConfig {
     required this.direccion,
     required this.telefono,
     this.mensajeDespedida = '¡Gracias por su compra!',
+    this.serie = 'B001',
   });
 
   factory BusinessConfig.defaultConfig() {
@@ -18,8 +20,9 @@ class BusinessConfig {
       nombre: 'Librería BiPenc',
       ruc: '00000000000',
       direccion: 'Ciudad Principal',
-      telefono: '123456789',
+      telefono: '',
       mensajeDespedida: '¡Vuelve pronto!',
+      serie: 'B001',
     );
   }
 }

@@ -1,0 +1,2739 @@
+# ✅ Walkthrough — Sprint de Mejoras BiPenc
+
+**5 mejoras implementadas** exitosamente.
+
+---
+
+## Mejora 1: Permisos Bluetooth Runtime
+
+**Archivo**: [print_service.dart](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/print_service.dart)
+
+**Antes**: [intentarReconectar()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/print_service.dart#115-131) llamaba directamente a `PrintBluetoothThermal.connectionStatus` sin verificar permisos. En Android 12+, esto fallaba silenciosamente.
+
+**Ahora**: Nuevo método [_ensureBluetoothPermissions()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/print_service.dart#75-114) que:
+- Verifica si los permisos `bluetoothScan` y `bluetoothConnect` están concedidos
+- Si no, los solicita al usuario
+- Si denegados, muestra SnackBar y aborta la reconexión
+- Solo aplica en Android (`Platform.isAndroid`)
+
+```diff:print_service.dart
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:bipenc/services/config_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:bipenc/core/keys.dart';
+import 'package:bipenc/data/models/producto.dart';
+import 'package:bipenc/data/models/business_config.dart';
+import 'package:bipenc/data/models/venta.dart';
+import 'package:bipenc/features/pos/pos_provider.dart';
+import 'package:bipenc/services/print_queue.dart';
+import 'package:bipenc/utils/app_logger.dart';
+
+class PrintService {
+  // ── SINGLETON ──
+  static final PrintService _instance = PrintService._();
+  factory PrintService() => _instance;
+  PrintService._() {
+    _initAutoConnect();
+  }
+
+  // ── HARDWARE CONFIG (PT-210) ─────────────────────────────────────────────
+  static const String whitelistedMacFallback = '04:7F:0E:4D:18:0F';
+  static const String defaultPin = '1234';
+
+  // ── ESTADO ──────────────────────────────────────────────────────────────
+  final _connectionController = StreamController<bool>.broadcast();
+  Stream<bool> get connectionStream => _connectionController.stream;
+
+  bool _estaConectado = false;
+  bool get estaConectado => _estaConectado;
+
+  // ── TIMERS ───────────────────────────────────────────────────────────────
+  int _failedReconnectCount = 0;
+  Timer? _reconnectTimer;  // Timer de back-off largo (30 min)
+  Timer? _watchdogTimer;   // Watchdog de inactividad (cada 60 s)
+
+  // ── INIT ─────────────────────────────────────────────────────────────────
+  void _initAutoConnect() {
+    // Intento inicial silencioso
+    intentarReconectar();
+
+    // Watchdog periódico: detecta pérdidas de conexión BT por inactividad física.
+    // Se ejecuta cada 60 s. Flutter lo suspende automáticamente en background,
+    // por lo que NO drena batería cuando la pantalla está apagada.
+    _startWatchdog();
+  }
+
+  /// Inicia (o reinicia) el watchdog de inactividad.
+  void _startWatchdog() {
+    _watchdogTimer?.cancel();
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      final stillConnected = await PrintBluetoothThermal.connectionStatus;
+      if (!stillConnected && _estaConectado) {
+        // La impresora se desconectó por timeout físico de BT
+        _estaConectado = false;
+        _connectionController.add(false);
+        AppLogger.warn(
+          'Watchdog: conexión BT perdida por inactividad. Reconectando…',
+          tag: 'BT',
+        );
+        await intentarReconectar();
+      }
+    });
+  }
+
+  // ── RECONEXIÓN ───────────────────────────────────────────────────────────
+
+  /// Punto de entrada para cualquier reconexión (startup, watchdog, bajo demanda).
+  Future<void> intentarReconectar() async {
+    final connected = await PrintBluetoothThermal.connectionStatus;
+    if (connected) {
+      _actualizarConectado(true);
+      return;
+    }
+    await _intentarConBackoff();
+  }
+
+  /// Backoff exponencial: 500 ms → 1 s → 2 s.
+  Future<bool> _intentarConBackoff({
+    int maxIntentos = 3,
+    int delayInicialMs = 500,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedMac = prefs.getString('printer_mac');
+    final macToConnect = (savedMac != null && savedMac.isNotEmpty)
+        ? savedMac
+        : whitelistedMacFallback;
+
+    // Verificar que la impresora está vinculada en el sistema
+    final paired = await PrintBluetoothThermal.pairedBluetooths;
+    final printer = paired.firstWhere(
+      (d) => d.macAdress == macToConnect,
+      orElse: () => BluetoothInfo(name: 'NONE', macAdress: ''),
+    );
+
+    if (printer.macAdress.isEmpty) {
+      _actualizarConectado(false);
+      if (savedMac != null) _notificarNecesidadEmparejamiento();
+      return false;
+    }
+
+    for (int i = 0; i < maxIntentos; i++) {
+      try {
+        final res = await PrintBluetoothThermal.connect(
+          macPrinterAddress: printer.macAdress,
+        );
+
+        if (res) {
+          _actualizarConectado(true);
+          AppLogger.info('BT reconectado en intento ${i + 1}', tag: 'BT');
+
+          // Cancelar el timer de back-off largo si estaba activo
+          _reconnectTimer?.cancel();
+          _reconnectTimer = null;
+          _failedReconnectCount = 0;
+
+          // Aprovechar la reconexión para vaciar la cola de impresiones pendientes
+          PrintQueue.procesarCola().catchError(
+            (e) => AppLogger.error('Error procesando cola BT', tag: 'BT', error: e),
+          );
+
+          return true;
+        }
+      } catch (e) {
+        AppLogger.warn('Intento BT $i falló: $e', tag: 'BT');
+      }
+
+      // Backoff: 500 ms, 1 s, 2 s
+      if (i < maxIntentos - 1) {
+        await Future.delayed(Duration(milliseconds: delayInicialMs * (1 << i)));
+      }
+    }
+
+    _actualizarConectado(false);
+    _failedReconnectCount++;
+
+    // Tras 3+ fallos consecutivos, dar un largo descanso antes de reintentar
+    if (_failedReconnectCount > 3) {
+      AppLogger.error(
+        'Impresora sin respuesta. Próximo reintento en 30 min',
+        tag: 'BT',
+      );
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(const Duration(minutes: 30), () {
+        _failedReconnectCount = 0;
+        intentarReconectar();
+      });
+    }
+
+    return false;
+  }
+
+  void _actualizarConectado(bool valor) {
+    _estaConectado = valor;
+    _connectionController.add(valor);
+  }
+
+  void _notificarNecesidadEmparejamiento() {
+    try {
+      scaffoldMessengerKey.currentState?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Impresora no vinculada. Empareja el dispositivo Bluetooth con PIN "1234".',
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 8),
+        ),
+      );
+    } catch (e) {
+      AppLogger.error('Error mostrando snackbar', tag: 'UI', error: e);
+    }
+  }
+
+  // ── DEBUG ─────────────────────────────────────────────────────────────────
+  /// Flag de auditoría: fuerza error para probar resiliencia de la UI
+  static bool debugForceError = false;
+
+  // ── CONFIGURACIÓN DE NEGOCIO ──────────────────────────────────────────────
+  Future<BusinessConfig> _getConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    return BusinessConfig(
+      nombre: prefs.getString('biz_nombre') ?? 'Librería BiPenc',
+      ruc: prefs.getString('biz_ruc') ?? '00000000000',
+      direccion: prefs.getString('biz_dir') ?? 'Ciudad Principal',
+      telefono: prefs.getString('biz_tel') ?? '123456789',
+      mensajeDespedida: prefs.getString('biz_msg') ?? '¡Gracias por su compra!',
+      serie: prefs.getString('biz_serie') ?? 'B001',
+    );
+  }
+
+  // ── VENDEDOR ──────────────────────────────────────────────────────────────
+  static Future<String> _getVendedorAlias() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return 'SISTEMA';
+      final response = await Supabase.instance.client
+          .from('perfiles')
+          .select('alias, nombre')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (response != null) {
+        final alias = response['alias'] as String?;
+        final nombre = response['nombre'] as String?;
+        return alias ??
+            nombre ??
+            user.email?.split('@').first.toUpperCase() ??
+            'VENDEDOR';
+      }
+      return user.email?.split('@').first.toUpperCase() ?? 'VENDEDOR';
+    } catch (_) {
+      return 'VENDEDOR';
+    }
+  }
+
+  // ── API PÚBLICA ───────────────────────────────────────────────────────────
+
+  /// Retrocompatibilidad rápida con PosProvider
+  Future<bool> imprimirTicketCortesia(
+    PosProvider estadoPos, {
+    double ahorroMayorista = 0.0,
+  }) {
+    return imprimirVenta(
+      items: estadoPos.items,
+      total: estadoPos.totalCobrar,
+      ahorroMayorista: ahorroMayorista,
+    );
+  }
+
+  /// Imprime un comprobante formal (Boleta/Factura) desde un modelo Venta
+  Future<bool> imprimirComprobante(Venta venta) async {
+    final vendedor = await _getVendedorAlias();
+    final rawId = venta.id;
+    final correlativo = rawId.length >= 8
+        ? rawId.substring(rawId.length - 8)
+        : rawId.padLeft(8, '0');
+    return imprimirVenta(
+      items: venta.items,
+      total: venta.total,
+      tipo: venta.tipoComprobante == TipoComprobante.factura
+          ? 'FACTURA ELECTRÓNICA'
+          : 'BOLETA ELECTRÓNICA',
+      correlativo: correlativo,
+      cliente: venta.nombreCliente,
+      dniRuc: venta.documentoCliente,
+      vendedor: vendedor,
+      ventaId: venta.id,
+    );
+  }
+
+  /// Método genérico para imprimir una venta
+  Future<bool> imprimirVenta({
+    required List<ItemCarrito> items,
+    required double total,
+    double ahorroMayorista = 0.0,
+    String? correlativo,
+    String? cliente,
+    String? dniRuc,
+    String tipo = 'TICKET',
+    String? vendedor,
+    String? ventaId,
+  }) async {
+    // Verificar/intentar conexión antes de generar bytes
+    bool conectado = await PrintBluetoothThermal.connectionStatus;
+    if (!conectado) {
+      await intentarReconectar();
+      conectado = await PrintBluetoothThermal.connectionStatus;
+    }
+
+    final config = await _getConfig();
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm58, profile);
+    List<int> bytes = [];
+
+    // ── INICIALIZACIÓN DE LA IMPRESORA ──────────────────────────────────────
+    // reset() limpia cualquier estado previo (estilos, buffer) antes del job.
+    // Crítico para evitar caracteres extraños cuando la impresora estaba en
+    // estado sucio por una sesión anterior o un error de transmisión.
+    bytes += generator.reset();
+
+    // CP850: soporta tildes (á, é, í, ó, ú) y ñ en impresoras de 58mm.
+    // DEBE ir después de reset() para garantizar que el code page queda activo.
+    bytes += generator.setGlobalCodeTable('CP850');
+
+    // ── ENCABEZADO COMERCIAL ────────────────────────────────────────────────
+    bytes += generator.text(
+      config.nombre.toUpperCase(),
+      styles: const PosStyles(
+        align: PosAlign.center,
+        height: PosTextSize.size2,
+        width: PosTextSize.size2,
+        bold: true,
+      ),
+    );
+    bytes += generator.text(
+      'RUC: ${config.ruc}',
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.text(
+      config.direccion,
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.hr(); // línea horizontal nativa ESC/POS
+
+    // ── INFO COMPRA ─────────────────────────────────────────────────────────
+    final fechaStr = DateTime.now()
+        .toString()
+        .substring(0, 16)
+        .replaceAll(' ', ' T: ');
+    bytes += generator.text(
+      'Fecha: $fechaStr',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.feed(1);
+    bytes += generator.text(
+      tipo.toUpperCase(),
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.text(
+      '${config.serie ?? "B001"}-${correlativo ?? "00000"}',
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.feed(1);
+
+    bytes += generator.text('CLIENTE: ${(cliente ?? 'PÚBLICO GENERAL').toUpperCase()}');
+    if (dniRuc != null && dniRuc.isNotEmpty && dniRuc != '00000000') {
+      bytes += generator.text('DNI/RUC: $dniRuc');
+    }
+    if (vendedor != null && vendedor.isNotEmpty) {
+      bytes += generator.text('ATENDIDO: $vendedor');
+    }
+    bytes += generator.hr();
+
+    // ── PRODUCTOS (con word-wrap para 58mm) ─────────────────────────────────
+    // Una impresora de 58mm en modo normal imprime ~32 caracteres por línea.
+    // Distribución: 3 (cant) + 19 (desc) + 10 (precio) = 32 chars.
+    for (final item in items) {
+      final String fullDesc = item.producto.nombre.toUpperCase();
+      final List<String> lines = _wrapText(fullDesc, 19);
+
+      for (int i = 0; i < lines.length; i++) {
+        if (i == 0) {
+          bytes += generator.row([
+            PosColumn(text: item.cantidad.toString().padRight(3), width: 2),
+            PosColumn(text: lines[i], width: 7),
+            PosColumn(
+              text: item.subtotal.toStringAsFixed(2).padLeft(6),
+              width: 3,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+          ]);
+        } else {
+          bytes += generator.row([
+            PosColumn(text: '   ', width: 2),
+            PosColumn(text: lines[i], width: 7),
+            PosColumn(text: '      ', width: 3),
+          ]);
+        }
+      }
+    }
+    bytes += generator.hr();
+
+    // ── TOTALES ──────────────────────────────────────────────────────────────
+    final ivaRate = await ConfigService.obtenerIGVActual();
+    final subtotalSinIgv = total / (1 + ivaRate);
+    final igv = total - subtotalSinIgv;
+
+    bytes += generator.row([
+      PosColumn(
+        text: 'Subtotal:',
+        width: 7,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+      PosColumn(
+        text: 'S/. ${subtotalSinIgv.toStringAsFixed(2)}',
+        width: 5,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+    ]);
+    bytes += generator.row([
+      PosColumn(
+        text: 'IGV (18%):',
+        width: 7,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+      PosColumn(
+        text: 'S/. ${igv.toStringAsFixed(2)}',
+        width: 5,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+    ]);
+    bytes += generator.feed(1);
+    bytes += generator.row([
+      PosColumn(
+        text: 'TOTAL:',
+        width: 5,
+        styles: const PosStyles(bold: true, height: PosTextSize.size2),
+      ),
+      PosColumn(
+        text: 'S/. ${total.toStringAsFixed(2)}',
+        width: 7,
+        styles: const PosStyles(
+          align: PosAlign.right,
+          bold: true,
+          height: PosTextSize.size2,
+        ),
+      ),
+    ]);
+
+    bytes += generator.feed(2);
+    bytes += generator.text(
+      'Representación impresa de la',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.text(
+      tipo,
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.feed(1);
+    bytes += generator.text(
+      config.mensajeDespedida,
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+
+    // ── CORTE ────────────────────────────────────────────────────────────────
+    bytes += generator.feed(3); // avanzar papel para superar la cuchilla física
+    bytes += generator.cut();
+
+    // Si no hay conexión o se forzó error, encolar para después
+    if (!conectado || debugForceError) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: tipo,
+        ventaId: ventaId ?? correlativo ?? '',
+      );
+      return false;
+    }
+
+    final result = await PrintBluetoothThermal.writeBytes(bytes);
+    if (!result) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: tipo,
+        ventaId: ventaId ?? correlativo ?? '',
+      );
+    }
+    return result;
+  }
+
+  /// Imprime un ticket de cierre de caja usando protocolo ESC/POS correcto.
+  ///
+  /// ANTES: usaba `ticketText.codeUnits` (bytes ASCII crudos), lo cual
+  /// causaba caracteres extraños porque ignora el code page CP850 activo
+  /// en la impresora.
+  ///
+  /// AHORA: construye un job ESC/POS completo con reset + CP850 + cut.
+  Future<bool> imprimirTicketCierre(String ticketText) async {
+    bool conectado = await PrintBluetoothThermal.connectionStatus;
+    if (!conectado) {
+      await intentarReconectar();
+      conectado = await PrintBluetoothThermal.connectionStatus;
+    }
+
+    // Construir job ESC/POS para garantizar CP850 y corte limpio
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm58, profile);
+    List<int> bytes = [];
+
+    bytes += generator.reset();
+    bytes += generator.setGlobalCodeTable('CP850');
+    bytes += generator.text(
+      ticketText,
+      styles: const PosStyles(align: PosAlign.left),
+    );
+    bytes += generator.feed(3);
+    bytes += generator.cut();
+
+    if (!conectado || debugForceError) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: 'CIERRE',
+        ventaId: '',
+      );
+      return false;
+    }
+
+    final result = await PrintBluetoothThermal.writeBytes(bytes);
+    if (!result) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: 'CIERRE',
+        ventaId: '',
+      );
+    }
+    return result;
+  }
+
+  // ── UTILIDADES ────────────────────────────────────────────────────────────
+
+  /// Word-wrap para 58mm (~32 chars por línea).
+  List<String> _wrapText(String text, int maxLength) {
+    final lines = <String>[];
+    final words = text.split(' ');
+    var currentLine = '';
+
+    for (final word in words) {
+      if (word.isEmpty) continue;
+      if ((currentLine.length + word.length + (currentLine.isEmpty ? 0 : 1)) <=
+          maxLength) {
+        currentLine +=
+            (currentLine.isEmpty ? '' : ' ') + word;
+      } else {
+        if (currentLine.isNotEmpty) lines.add(currentLine);
+        // Palabra más larga que el ancho: cortar
+        currentLine = word.length > maxLength
+            ? word.substring(0, maxLength)
+            : word;
+      }
+    }
+    if (currentLine.isNotEmpty) lines.add(currentLine);
+    return lines;
+  }
+
+  // ── LIFECYCLE ─────────────────────────────────────────────────────────────
+
+  /// Libera recursos. Llamar en el `dispose()` del widget raíz o lifecycle.
+  void dispose() {
+    _watchdogTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _connectionController.close();
+    AppLogger.info('PrintService disposed', tag: 'BT');
+  }
+}
+===
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:bipenc/services/config_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:bipenc/core/keys.dart';
+import 'package:bipenc/data/models/producto.dart';
+import 'package:bipenc/data/models/business_config.dart';
+import 'package:bipenc/data/models/venta.dart';
+import 'package:bipenc/features/pos/pos_provider.dart';
+import 'package:bipenc/services/print_queue.dart';
+import 'package:bipenc/utils/app_logger.dart';
+
+class PrintService {
+  // ── SINGLETON ──
+  static final PrintService _instance = PrintService._();
+  factory PrintService() => _instance;
+  PrintService._() {
+    _initAutoConnect();
+  }
+
+  // ── HARDWARE CONFIG (PT-210) ─────────────────────────────────────────────
+  static const String whitelistedMacFallback = '04:7F:0E:4D:18:0F';
+  static const String defaultPin = '1234';
+
+  // ── ESTADO ──────────────────────────────────────────────────────────────
+  final _connectionController = StreamController<bool>.broadcast();
+  Stream<bool> get connectionStream => _connectionController.stream;
+
+  bool _estaConectado = false;
+  bool get estaConectado => _estaConectado;
+
+  // ── TIMERS ───────────────────────────────────────────────────────────────
+  int _failedReconnectCount = 0;
+  Timer? _reconnectTimer;  // Timer de back-off largo (30 min)
+  Timer? _watchdogTimer;   // Watchdog de inactividad (cada 60 s)
+
+  // ── INIT ─────────────────────────────────────────────────────────────────
+  void _initAutoConnect() {
+    // Intento inicial silencioso
+    intentarReconectar();
+
+    // Watchdog periódico: detecta pérdidas de conexión BT por inactividad física.
+    // Se ejecuta cada 60 s. Flutter lo suspende automáticamente en background,
+    // por lo que NO drena batería cuando la pantalla está apagada.
+    _startWatchdog();
+  }
+
+  /// Inicia (o reinicia) el watchdog de inactividad.
+  void _startWatchdog() {
+    _watchdogTimer?.cancel();
+    _watchdogTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      final stillConnected = await PrintBluetoothThermal.connectionStatus;
+      if (!stillConnected && _estaConectado) {
+        // La impresora se desconectó por timeout físico de BT
+        _estaConectado = false;
+        _connectionController.add(false);
+        AppLogger.warn(
+          'Watchdog: conexión BT perdida por inactividad. Reconectando…',
+          tag: 'BT',
+        );
+        await intentarReconectar();
+      }
+    });
+  }
+
+  // ── RECONEXIÓN ───────────────────────────────────────────────────────────
+
+  /// Solicita permisos Bluetooth runtime (Android 12+).
+  /// Retorna true si los permisos fueron concedidos.
+  Future<bool> _ensureBluetoothPermissions() async {
+    // Solo Android necesita permisos runtime para Bluetooth
+    if (!Platform.isAndroid) return true;
+
+    final scanStatus = await Permission.bluetoothScan.status;
+    final connectStatus = await Permission.bluetoothConnect.status;
+
+    if (scanStatus.isGranted && connectStatus.isGranted) return true;
+
+    // Solicitar permisos faltantes
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+    ].request();
+
+    final granted = statuses[Permission.bluetoothScan]?.isGranted == true &&
+        statuses[Permission.bluetoothConnect]?.isGranted == true;
+
+    if (!granted) {
+      AppLogger.warn(
+        'Permisos Bluetooth denegados por el usuario',
+        tag: 'BT',
+      );
+      try {
+        scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              '⚠️ Permisos Bluetooth necesarios para imprimir. Actívalos en Ajustes.',
+            ),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 6),
+          ),
+        );
+      } catch (_) {}
+    }
+    return granted;
+  }
+
+  /// Punto de entrada para cualquier reconexión (startup, watchdog, bajo demanda).
+  Future<void> intentarReconectar() async {
+    // Verificar permisos antes de intentar cualquier operación BT
+    final hasPermissions = await _ensureBluetoothPermissions();
+    if (!hasPermissions) {
+      _actualizarConectado(false);
+      return;
+    }
+
+    final connected = await PrintBluetoothThermal.connectionStatus;
+    if (connected) {
+      _actualizarConectado(true);
+      return;
+    }
+    await _intentarConBackoff();
+  }
+
+  /// Backoff exponencial: 500 ms → 1 s → 2 s.
+  Future<bool> _intentarConBackoff({
+    int maxIntentos = 3,
+    int delayInicialMs = 500,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedMac = prefs.getString('printer_mac');
+    final macToConnect = (savedMac != null && savedMac.isNotEmpty)
+        ? savedMac
+        : whitelistedMacFallback;
+
+    // Verificar que la impresora está vinculada en el sistema
+    final paired = await PrintBluetoothThermal.pairedBluetooths;
+    final printer = paired.firstWhere(
+      (d) => d.macAdress == macToConnect,
+      orElse: () => BluetoothInfo(name: 'NONE', macAdress: ''),
+    );
+
+    if (printer.macAdress.isEmpty) {
+      _actualizarConectado(false);
+      if (savedMac != null) _notificarNecesidadEmparejamiento();
+      return false;
+    }
+
+    for (int i = 0; i < maxIntentos; i++) {
+      try {
+        final res = await PrintBluetoothThermal.connect(
+          macPrinterAddress: printer.macAdress,
+        );
+
+        if (res) {
+          _actualizarConectado(true);
+          AppLogger.info('BT reconectado en intento ${i + 1}', tag: 'BT');
+
+          // Cancelar el timer de back-off largo si estaba activo
+          _reconnectTimer?.cancel();
+          _reconnectTimer = null;
+          _failedReconnectCount = 0;
+
+          // Aprovechar la reconexión para vaciar la cola de impresiones pendientes
+          PrintQueue.procesarCola().catchError(
+            (e) => AppLogger.error('Error procesando cola BT', tag: 'BT', error: e),
+          );
+
+          return true;
+        }
+      } catch (e) {
+        AppLogger.warn('Intento BT $i falló: $e', tag: 'BT');
+      }
+
+      // Backoff: 500 ms, 1 s, 2 s
+      if (i < maxIntentos - 1) {
+        await Future.delayed(Duration(milliseconds: delayInicialMs * (1 << i)));
+      }
+    }
+
+    _actualizarConectado(false);
+    _failedReconnectCount++;
+
+    // Tras 3+ fallos consecutivos, dar un largo descanso antes de reintentar
+    if (_failedReconnectCount > 3) {
+      AppLogger.error(
+        'Impresora sin respuesta. Próximo reintento en 30 min',
+        tag: 'BT',
+      );
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(const Duration(minutes: 30), () {
+        _failedReconnectCount = 0;
+        intentarReconectar();
+      });
+    }
+
+    return false;
+  }
+
+  void _actualizarConectado(bool valor) {
+    _estaConectado = valor;
+    _connectionController.add(valor);
+  }
+
+  void _notificarNecesidadEmparejamiento() {
+    try {
+      scaffoldMessengerKey.currentState?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Impresora no vinculada. Empareja el dispositivo Bluetooth con PIN "1234".',
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 8),
+        ),
+      );
+    } catch (e) {
+      AppLogger.error('Error mostrando snackbar', tag: 'UI', error: e);
+    }
+  }
+
+  // ── DEBUG ─────────────────────────────────────────────────────────────────
+  /// Flag de auditoría: fuerza error para probar resiliencia de la UI
+  static bool debugForceError = false;
+
+  // ── CONFIGURACIÓN DE NEGOCIO ──────────────────────────────────────────────
+  Future<BusinessConfig> _getConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    return BusinessConfig(
+      nombre: prefs.getString('biz_nombre') ?? 'Librería BiPenc',
+      ruc: prefs.getString('biz_ruc') ?? '00000000000',
+      direccion: prefs.getString('biz_dir') ?? 'Ciudad Principal',
+      telefono: prefs.getString('biz_tel') ?? '123456789',
+      mensajeDespedida: prefs.getString('biz_msg') ?? '¡Gracias por su compra!',
+      serie: prefs.getString('biz_serie') ?? 'B001',
+    );
+  }
+
+  // ── VENDEDOR ──────────────────────────────────────────────────────────────
+  static Future<String> _getVendedorAlias() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return 'SISTEMA';
+      final response = await Supabase.instance.client
+          .from('perfiles')
+          .select('alias, nombre')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (response != null) {
+        final alias = response['alias'] as String?;
+        final nombre = response['nombre'] as String?;
+        return alias ??
+            nombre ??
+            user.email?.split('@').first.toUpperCase() ??
+            'VENDEDOR';
+      }
+      return user.email?.split('@').first.toUpperCase() ?? 'VENDEDOR';
+    } catch (_) {
+      return 'VENDEDOR';
+    }
+  }
+
+  // ── API PÚBLICA ───────────────────────────────────────────────────────────
+
+  /// Retrocompatibilidad rápida con PosProvider
+  Future<bool> imprimirTicketCortesia(
+    PosProvider estadoPos, {
+    double ahorroMayorista = 0.0,
+  }) {
+    return imprimirVenta(
+      items: estadoPos.items,
+      total: estadoPos.totalCobrar,
+      ahorroMayorista: ahorroMayorista,
+    );
+  }
+
+  /// Imprime un comprobante formal (Boleta/Factura) desde un modelo Venta
+  Future<bool> imprimirComprobante(Venta venta) async {
+    final vendedor = await _getVendedorAlias();
+    final rawId = venta.id;
+    final correlativo = rawId.length >= 8
+        ? rawId.substring(rawId.length - 8)
+        : rawId.padLeft(8, '0');
+    return imprimirVenta(
+      items: venta.items,
+      total: venta.total,
+      tipo: venta.tipoComprobante == TipoComprobante.factura
+          ? 'FACTURA ELECTRÓNICA'
+          : 'BOLETA ELECTRÓNICA',
+      correlativo: correlativo,
+      cliente: venta.nombreCliente,
+      dniRuc: venta.documentoCliente,
+      vendedor: vendedor,
+      ventaId: venta.id,
+    );
+  }
+
+  /// Método genérico para imprimir una venta
+  Future<bool> imprimirVenta({
+    required List<ItemCarrito> items,
+    required double total,
+    double ahorroMayorista = 0.0,
+    String? correlativo,
+    String? cliente,
+    String? dniRuc,
+    String tipo = 'TICKET',
+    String? vendedor,
+    String? ventaId,
+  }) async {
+    // Verificar/intentar conexión antes de generar bytes
+    bool conectado = await PrintBluetoothThermal.connectionStatus;
+    if (!conectado) {
+      await intentarReconectar();
+      conectado = await PrintBluetoothThermal.connectionStatus;
+    }
+
+    final config = await _getConfig();
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm58, profile);
+    List<int> bytes = [];
+
+    // ── INICIALIZACIÓN DE LA IMPRESORA ──────────────────────────────────────
+    // reset() limpia cualquier estado previo (estilos, buffer) antes del job.
+    // Crítico para evitar caracteres extraños cuando la impresora estaba en
+    // estado sucio por una sesión anterior o un error de transmisión.
+    bytes += generator.reset();
+
+    // CP850: soporta tildes (á, é, í, ó, ú) y ñ en impresoras de 58mm.
+    // DEBE ir después de reset() para garantizar que el code page queda activo.
+    bytes += generator.setGlobalCodeTable('CP850');
+
+    // ── ENCABEZADO COMERCIAL ────────────────────────────────────────────────
+    bytes += generator.text(
+      config.nombre.toUpperCase(),
+      styles: const PosStyles(
+        align: PosAlign.center,
+        height: PosTextSize.size2,
+        width: PosTextSize.size2,
+        bold: true,
+      ),
+    );
+    bytes += generator.text(
+      'RUC: ${config.ruc}',
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.text(
+      config.direccion,
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    if (config.telefono.isNotEmpty) {
+      bytes += generator.text(
+        'Tel: ${config.telefono}',
+        styles: const PosStyles(align: PosAlign.center),
+      );
+    }
+    bytes += generator.hr(); // línea horizontal nativa ESC/POS
+
+    // ── INFO COMPRA ─────────────────────────────────────────────────────────
+    final fechaStr = DateTime.now()
+        .toString()
+        .substring(0, 16)
+        .replaceAll(' ', ' T: ');
+    bytes += generator.text(
+      'Fecha: $fechaStr',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.feed(1);
+    bytes += generator.text(
+      tipo.toUpperCase(),
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.text(
+      '${config.serie ?? "B001"}-${correlativo ?? "00000"}',
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.feed(1);
+
+    bytes += generator.text('CLIENTE: ${(cliente ?? 'PÚBLICO GENERAL').toUpperCase()}');
+    if (dniRuc != null && dniRuc.isNotEmpty && dniRuc != '00000000') {
+      bytes += generator.text('DNI/RUC: $dniRuc');
+    }
+    if (vendedor != null && vendedor.isNotEmpty) {
+      bytes += generator.text('ATENDIDO: $vendedor');
+    }
+    bytes += generator.hr();
+
+    // ── PRODUCTOS (con word-wrap para 58mm) ─────────────────────────────────
+    // Una impresora de 58mm en modo normal imprime ~32 caracteres por línea.
+    // Distribución: 2 (cant) + 4 (p.unit) + 3 (desc) + 3 (subtotal) = 12 cols.
+    bytes += generator.row([
+      PosColumn(text: 'Cnt', width: 2, styles: const PosStyles(bold: true)),
+      PosColumn(text: 'Descripcion', width: 5, styles: const PosStyles(bold: true)),
+      PosColumn(text: 'P.U.', width: 2, styles: const PosStyles(align: PosAlign.right, bold: true)),
+      PosColumn(text: 'Total', width: 3, styles: const PosStyles(align: PosAlign.right, bold: true)),
+    ]);
+    bytes += generator.hr(ch: '-');
+
+    int totalItems = 0;
+    for (final item in items) {
+      totalItems += item.cantidad;
+      final String fullDesc = item.producto.nombre.toUpperCase();
+      final List<String> lines = _wrapText(fullDesc, 16);
+      final precioUnit = (item.subtotal / item.cantidad).toStringAsFixed(2);
+
+      for (int i = 0; i < lines.length; i++) {
+        if (i == 0) {
+          bytes += generator.row([
+            PosColumn(text: item.cantidad.toString().padRight(2), width: 2),
+            PosColumn(text: lines[i], width: 5),
+            PosColumn(
+              text: precioUnit,
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: item.subtotal.toStringAsFixed(2),
+              width: 3,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+          ]);
+        } else {
+          bytes += generator.row([
+            PosColumn(text: '  ', width: 2),
+            PosColumn(text: lines[i], width: 5),
+            PosColumn(text: '', width: 2),
+            PosColumn(text: '', width: 3),
+          ]);
+        }
+      }
+    }
+    bytes += generator.hr();
+    bytes += generator.text(
+      'Productos: $totalItems items',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+
+    // ── TOTALES ──────────────────────────────────────────────────────────────
+    final ivaRate = await ConfigService.obtenerIGVActual();
+    final subtotalSinIgv = total / (1 + ivaRate);
+    final igv = total - subtotalSinIgv;
+
+    bytes += generator.row([
+      PosColumn(
+        text: 'Subtotal:',
+        width: 7,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+      PosColumn(
+        text: 'S/. ${subtotalSinIgv.toStringAsFixed(2)}',
+        width: 5,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+    ]);
+    bytes += generator.row([
+      PosColumn(
+        text: 'IGV (18%):',
+        width: 7,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+      PosColumn(
+        text: 'S/. ${igv.toStringAsFixed(2)}',
+        width: 5,
+        styles: const PosStyles(align: PosAlign.right),
+      ),
+    ]);
+    bytes += generator.feed(1);
+    bytes += generator.row([
+      PosColumn(
+        text: 'TOTAL:',
+        width: 5,
+        styles: const PosStyles(bold: true, height: PosTextSize.size2),
+      ),
+      PosColumn(
+        text: 'S/. ${total.toStringAsFixed(2)}',
+        width: 7,
+        styles: const PosStyles(
+          align: PosAlign.right,
+          bold: true,
+          height: PosTextSize.size2,
+        ),
+      ),
+    ]);
+
+    bytes += generator.feed(2);
+    bytes += generator.text(
+      'Representación impresa de la',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+    bytes += generator.text(
+      tipo,
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+    bytes += generator.feed(1);
+    bytes += generator.text(
+      config.mensajeDespedida,
+      styles: const PosStyles(align: PosAlign.center, bold: true),
+    );
+
+    // ── CORTE ────────────────────────────────────────────────────────────────
+    bytes += generator.feed(3); // avanzar papel para superar la cuchilla física
+    bytes += generator.cut();
+
+    // Si no hay conexión o se forzó error, encolar para después
+    if (!conectado || debugForceError) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: tipo,
+        ventaId: ventaId ?? correlativo ?? '',
+      );
+      return false;
+    }
+
+    final result = await PrintBluetoothThermal.writeBytes(bytes);
+    if (!result) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: tipo,
+        ventaId: ventaId ?? correlativo ?? '',
+      );
+    }
+    return result;
+  }
+
+  /// Imprime un ticket de cierre de caja usando protocolo ESC/POS correcto.
+  ///
+  /// ANTES: usaba `ticketText.codeUnits` (bytes ASCII crudos), lo cual
+  /// causaba caracteres extraños porque ignora el code page CP850 activo
+  /// en la impresora.
+  ///
+  /// AHORA: construye un job ESC/POS completo con reset + CP850 + cut.
+  Future<bool> imprimirTicketCierre(String ticketText) async {
+    bool conectado = await PrintBluetoothThermal.connectionStatus;
+    if (!conectado) {
+      await intentarReconectar();
+      conectado = await PrintBluetoothThermal.connectionStatus;
+    }
+
+    // Construir job ESC/POS para garantizar CP850 y corte limpio
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm58, profile);
+    List<int> bytes = [];
+
+    bytes += generator.reset();
+    bytes += generator.setGlobalCodeTable('CP850');
+    bytes += generator.text(
+      ticketText,
+      styles: const PosStyles(align: PosAlign.left),
+    );
+    bytes += generator.feed(3);
+    bytes += generator.cut();
+
+    if (!conectado || debugForceError) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: 'CIERRE',
+        ventaId: '',
+      );
+      return false;
+    }
+
+    final result = await PrintBluetoothThermal.writeBytes(bytes);
+    if (!result) {
+      await PrintQueue.encolarImpresion(
+        bytes: bytes,
+        tipoComprobante: 'CIERRE',
+        ventaId: '',
+      );
+    }
+    return result;
+  }
+
+  // ── UTILIDADES ────────────────────────────────────────────────────────────
+
+  /// Word-wrap para 58mm (~32 chars por línea).
+  List<String> _wrapText(String text, int maxLength) {
+    final lines = <String>[];
+    final words = text.split(' ');
+    var currentLine = '';
+
+    for (final word in words) {
+      if (word.isEmpty) continue;
+      if ((currentLine.length + word.length + (currentLine.isEmpty ? 0 : 1)) <=
+          maxLength) {
+        currentLine +=
+            (currentLine.isEmpty ? '' : ' ') + word;
+      } else {
+        if (currentLine.isNotEmpty) lines.add(currentLine);
+        // Palabra más larga que el ancho: cortar
+        currentLine = word.length > maxLength
+            ? word.substring(0, maxLength)
+            : word;
+      }
+    }
+    if (currentLine.isNotEmpty) lines.add(currentLine);
+    return lines;
+  }
+
+  // ── LIFECYCLE ─────────────────────────────────────────────────────────────
+
+  /// Libera recursos. Llamar en el `dispose()` del widget raíz o lifecycle.
+  void dispose() {
+    _watchdogTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _connectionController.close();
+    AppLogger.info('PrintService disposed', tag: 'BT');
+  }
+}
+```
+
+---
+
+## Mejora 2: Ticket ESC/POS Mejorado
+
+**Archivo**: [print_service.dart](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/print_service.dart)
+
+**Cambios**:
+- ✅ Teléfono del negocio en encabezado
+- ✅ Encabezado de columnas: `Cnt | Descripcion | P.U. | Total`
+- ✅ Precio unitario por ítem
+- ✅ Conteo total de productos al final
+
+---
+
+## Mejora 3: Sync Bidireccional
+
+**Archivos**: [supabase_service.dart](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/supabase_service.dart) + [local_db_service.dart](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/local_db_service.dart)
+
+| Dirección | Implementación |
+|---|---|
+| **Local → Supabase** | [eliminarProducto()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/local_db_service.dart#482-494) agrega a `sync_queue` → [procesarSyncQueue()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/supabase_service.dart#361-393) borra de Supabase |
+| **Supabase → Local** | [sincronizarProductos()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/supabase_service.dart#272-330) detecta IDs ausentes → [eliminarProductoLocal()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/local_db_service.dart#495-502) borra sin re-sync |
+
+**Bug corregido**: [procesarSyncQueue()](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/lib/services/supabase_service.dart#361-393) tenía un `if/else-if` mal anidado que hacía la acción DELETE inalcanzable.
+
+```diff:supabase_service.dart
+import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:bipenc/data/models/producto.dart';
+import 'package:bipenc/data/models/presentation.dart';
+import 'package:bipenc/helpers/alias_helper.dart';
+import 'package:bipenc/services/local_db_service.dart';
+import 'package:bipenc/utils/app_logger.dart';
+import 'package:path/path.dart' as p;
+import 'package:bipenc/data/models/venta.dart';
+import 'package:bipenc/services/config_service.dart';
+import 'package:bipenc/core/constantes/categorias_producto.dart';
+
+class SupabaseService {
+  static final client = Supabase.instance.client;
+
+  /// Genera/obtiene el siguiente correlativo desde el RPC nativo.
+  /// IMPORTANTE: Ahora usa RPC 'generar_correlativo' en lugar de fallback timestamp.
+  /// Si el RPC falla, retorna un identificador temporal seguro pero LOGUEA WARNING.
+  static Future<String> generarSiguienteCorrelativo(String alias) async {
+    try {
+      AppLogger.debug(
+        'Llamando RPC generar_correlativo para alias: $alias',
+        tag: 'CORRELATIVO',
+      );
+
+      // Llamar RPC nativo
+      final res = await client.rpc(
+        'generar_correlativo',
+        params: {'alias': alias},
+      ).maybeSingle();
+
+      if (res != null && res['correlativo'] != null) {
+        final corrResult = res['correlativo'].toString();
+        AppLogger.info(
+          'Correlativo generado por RPC: $corrResult',
+          tag: 'CORRELATIVO',
+        );
+        return corrResult;
+      }
+
+      // Si RPC retorna null o sin campo correlativo
+      throw Exception('RPC retornó respuesta vacía');
+    } on PostgrestException catch (e) {
+      AppLogger.warning(
+        'Error PostgreSQL en RPC: ${e.message}. Usando fallback temporal.',
+        tag: 'CORRELATIVO',
+      );
+      return _generarCorrelativoFallback();
+    } on TimeoutException catch (e) {
+      AppLogger.warning(
+        'Timeout en RPC. Usando fallback temporal.',
+        tag: 'CORRELATIVO',
+      );
+      return _generarCorrelativoFallback();
+    } catch (e) {
+      AppLogger.error(
+        'Error inesperado en RPC: $e. Usando fallback temporal.',
+        tag: 'CORRELATIVO',
+        error: e,
+      );
+      return _generarCorrelativoFallback();
+    }
+  }
+
+  /// Fallback: Genera correlativo temporal si RPC falla
+  /// Usa timestamp + random para evitar colisiones
+  static String _generarCorrelativoFallback() {
+    final now = DateTime.now();
+    final timestamp = now.millisecondsSinceEpoch;
+    final random = (now.microsecond % 1000).toString().padLeft(3, '0');
+    final fallbackCorr = 'T-${timestamp % 1000000}-$random';
+    AppLogger.warning(
+      'Usando correlativo fallback: $fallbackCorr (NOTA: Esto NO debería suceder en producción)',
+      tag: 'CORRELATIVO',
+    );
+    return fallbackCorr;
+  }
+
+  // ──────────────────────────────────────────────
+  // Configuración Global y Versiones
+  // ──────────────────────────────────────────────
+
+  /// Obtiene la versión mínima requerida desde Supabase
+  static Future<String?> obtenerVersionMinima() async {
+    try {
+      final res = await client
+          .from('store_config')
+          .select('min_version')
+          .eq('id', 1)
+          .maybeSingle();
+      return res?['min_version']?.toString();
+    } catch (e) {
+      AppLogger.error('Error obteniendo min_version', tag: 'CONFIG', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Storage — Imágenes
+  // ──────────────────────────────────────────────
+
+  /// Sube la imagen al bucket 'productos' y retorna la URL pública.
+  static Future<String?> subirImagen(File imageFile) async {
+    try {
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${p.basename(imageFile.path)}';
+      final path = 'public/$fileName';
+
+      await client.storage.from('productos').upload(path, imageFile);
+
+      final String publicUrl = client.storage.from('productos').getPublicUrl(path);
+      AppLogger.info('Imagen subida: $publicUrl', tag: 'STORAGE');
+      return publicUrl;
+    } catch (e) {
+      AppLogger.error('Error subiendo imagen', tag: 'STORAGE', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Perfiles
+  // ──────────────────────────────────────────────
+
+  static Future<Perfil?> obtenerPerfil() async {
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) {
+        AppLogger.warning('currentUser es null', tag: 'PERFIL');
+        return null;
+      }
+
+      final response = await client
+          .from('perfiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (response == null) {
+        AppLogger.warning('No se encontró fila en perfiles para userId: ${user.id}', tag: 'PERFIL');
+        return null;
+      }
+
+      AppLogger.info('Perfil: alias=${response['alias']} rol=${response['rol']}', tag: 'PERFIL');
+      return Perfil(
+        id: response['id'],
+        nombre: response['nombre'],
+        apellido: response['apellido'],
+        alias: response['alias'],
+        rol: response['rol'],
+        deviceId: response['device_id'],
+      );
+    } catch (e) {
+      AppLogger.error('Error obteniendo perfil', tag: 'PERFIL', error: e);
+      return null;
+    }
+  }
+
+  /// Crea un perfil mínimo de recuperación cuando el usuario tiene cuenta
+  /// Auth pero no tiene fila en la tabla perfiles.
+  static Future<Perfil?> crearPerfilDeRecuperacion() async {
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) return null;
+
+      final email = user.email ?? 'usuario';
+      final base = email.split('@').first;
+      final nombre = base.length > 1 ? base[0].toUpperCase() + base.substring(1) : base.toUpperCase();
+      const apellido = 'BiPenc';
+      final alias = AliasHelper.generarAlias(nombre, apellido);
+
+      // Primer perfil del sistema → SERVER, el resto → VENTAS
+      final countRes = await client.from('perfiles').select().count(CountOption.exact);
+      final bool isFirst = countRes.count == 0;
+      final String rol = isFirst ? 'SERVER' : 'VENTAS';
+
+      AppLogger.info('Creando perfil de recuperación: alias=$alias rol=$rol', tag: 'PERFIL');
+
+      await client.from('perfiles').insert({
+        'id': user.id,
+        'nombre': nombre,
+        'apellido': apellido,
+        'alias': alias,
+        'rol': rol,
+      });
+
+      return Perfil(id: user.id, nombre: nombre, apellido: apellido, alias: alias, rol: rol);
+    } catch (e) {
+      AppLogger.error('No se pudo crear perfil de recuperación', tag: 'PERFIL', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Autenticación
+  // ──────────────────────────────────────────────
+
+  static Future<AuthResponse?> iniciarSesion(String email, String password) async {
+    try {
+      final response = await client.auth.signInWithPassword(email: email, password: password);
+      AppLogger.info('Login OK: ${response.user?.email}', tag: 'AUTH');
+      return response;
+    } on AuthException catch (e) {
+      AppLogger.error('Error AuthException: ${e.message}', tag: 'AUTH');
+      rethrow;
+    } catch (e) {
+      AppLogger.error('Error inesperado en login', tag: 'AUTH', error: e);
+      return null;
+    }
+  }
+
+  static Future<String?> crearCuenta(String email, String password, String nombre, String apellido) async {
+    try {
+      final res = await client.auth.signUp(email: email, password: password);
+      final user = res.user;
+
+      if (user == null) return 'Error al crear la cuenta.';
+
+      if (res.session == null) {
+        return 'Cuenta creada. Revisa tu email para confirmar antes de ingresar.';
+      }
+
+      final exitoPerfil = await _crearPerfilEnBaseDeDatos(user.id, nombre, apellido);
+
+      if (exitoPerfil) return null;
+      return 'Cuenta creada, pero hubo un problema al configurar tu perfil.';
+    } on AuthException catch (e) {
+      if (e.message.contains('rate limit')) {
+        return 'Demasiados intentos. Intenta de nuevo en unos minutos.';
+      }
+      if (e.message.contains('already registered')) {
+        return 'Este correo ya está registrado.';
+      }
+      return e.message;
+    } catch (e) {
+      AppLogger.error('Error en registro', tag: 'AUTH', error: e);
+      if (e.toString().contains('FormatException')) {
+        return 'Error de servidor. Revisa tu conexión.';
+      }
+      return 'Error: $e';
+    }
+  }
+
+  static Future<bool> _crearPerfilEnBaseDeDatos(String userId, String nombre, String apellido) async {
+    try {
+      final alias = AliasHelper.generarAlias(nombre, apellido);
+
+      // Primer perfil del sistema → SERVER, el resto → VENTAS
+      final countRes = await client.from('perfiles').select().count(CountOption.exact);
+      final bool isFirst = countRes.count == 0;
+      final String rol = isFirst ? 'SERVER' : 'VENTAS';
+
+      await client.from('perfiles').insert({
+        'id': userId,
+        'nombre': nombre,
+        'apellido': apellido,
+        'alias': alias,
+        'rol': rol,
+      });
+      return true;
+    } catch (e) {
+      AppLogger.error('Error insertando perfil en DB', tag: 'AUTH', error: e);
+      return false;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Sincronización
+  // ──────────────────────────────────────────────
+
+  static Future<bool> sincronizarProductos() async {
+    try {
+      final response = await client.from('productos').select().order('nombre');
+      final lista = response as List;
+
+      if (lista.isEmpty) {
+        AppLogger.warning('sincronizarProductos: tabla "productos" devolvió 0 filas', tag: 'SYNC');
+        return true;
+      }
+
+      // 🔍 Log diagnóstico: imprime las claves de la primera fila para auditoría
+      final primeraFila = lista.first as Map<String, dynamic>;
+      AppLogger.info('Columnas recibidas de Supabase: ${primeraFila.keys.toList()}', tag: 'SYNC');
+      AppLogger.info('Primera fila raw: $primeraFila', tag: 'SYNC');
+
+      final List<Producto> productos = lista
+          .map<Producto>((row) => mapToProducto(row as Map<String, dynamic>))
+          .where((p) => p.id.isNotEmpty)
+          .toList();
+
+      try {
+        await LocalDbService.upsertProductos(productos);
+        AppLogger.info('${productos.length}/${lista.length} productos sincronizados', tag: 'SYNC');
+      } catch (dbError) {
+        AppLogger.error('Fallo cr\u00EDtico insertando productos en SQLite local durante sincronizaci\u00F3n', tag: 'SYNC', error: dbError);
+        return false;
+      }
+      return true;
+    } catch (e, st) {
+      AppLogger.error('Error sincronizando productos: $e\n$st', tag: 'SYNC', error: e);
+      return false;
+    }
+  }
+
+  /// Categorías dinámicas (Mission CTO)
+  static Future<List<String>> obtenerCategorias() async {
+    try {
+      final res = await client.from('categorias').select('nombre').order('nombre');
+      return (res as List).map((row) => row['nombre'].toString()).toList();
+    } catch (e) {
+      AppLogger.warning('No se pudo obtener categorías de Supabase. Usando locales.', tag: 'SYNC');
+      return List.from(CategoriasProducto.lista);
+    }
+  }
+
+  static Future<void> agregarCategoria(String nombre) async {
+    try {
+      await client.from('categorias').upsert({'nombre': nombre}, onConflict: 'nombre');
+      AppLogger.info('Categoría agregada/actualizada: $nombre', tag: 'SYNC');
+    } catch (e) {
+      AppLogger.error('Error agregando categoría a Supabase', tag: 'SYNC', error: e);
+    }
+  }
+
+  static Future<void> subirVentasPendientes() async {
+    try {
+      final pendientes = await LocalDbService.obtenerVentasPendientes();
+      if (pendientes.isEmpty) return;
+
+      AppLogger.info('Subiendo ${pendientes.length} ventas pendientes...', tag: 'SYNC');
+      for (final venta in pendientes) {
+        try {
+          final itemsDecoded = jsonDecode(venta['items_json'] ?? '[]');
+          
+          await client.from('ventas').insert({
+            'correlativo': venta['correlativo'],
+            'serie': venta['serie'] ?? 'B001',
+            'tipo_comprobante_cod': (venta['correlativo']?.toString().contains('F') ?? false) ? '01' : '03',
+            'items': itemsDecoded,
+            'total': venta['total'],
+            'subtotal': venta['subtotal'],
+            'operacion_gravada': venta['subtotal'], // Blueprint compliance
+            'igv': venta['igv'],
+            'dni_cliente': venta['documento_cliente'],
+            'nombre_cliente': venta['nombre_cliente'],
+            'alias_vendedor': venta['alias_vendedor'],
+            'despachado': (venta['despachado'] ?? 0) == 1,
+          });
+          await LocalDbService.marcarVentaSincronizada(venta['id'] as int);
+        } catch (itemError) {
+          AppLogger.error('Error subiendo venta local ID ${venta['id']}', tag: 'SYNC', error: itemError);
+          await LocalDbService.registrarErrorSincronizacion(venta['id'] as int, itemError.toString());
+        }
+      }
+    } catch (e) {
+      AppLogger.error('Error general de cola de ventas pendientes', tag: 'SYNC', error: e);
+    }
+  }
+
+  /// Procesa la cola de sincronización (Stock y Eliminaciones).
+  static Future<void> procesarSyncQueue() async {
+    try {
+      final queue = await LocalDbService.obtenerSyncQueue();
+      if (queue.isEmpty) return;
+
+      AppLogger.info('Procesando sync_queue con ${queue.length} items...', tag: 'SYNC');
+      for (final item in queue) {
+        final id = item['id'] as int;
+        final tabla = item['tabla'] as String;
+        final identifier = item['identificador'] as String;
+        final accion = item['accion'] as String;
+        final datos = item['datos_json'] != null ? jsonDecode(item['datos_json']) : null;
+
+        bool success = false;
+        if (tabla == 'productos') {
+            success = true;
+          } else if (accion == 'DELETE') {
+            // Soft delete: marcar como inactivo en lugar de borrar
+            await client.from('productos')
+              .update({'is_active': false, 'state': 'DESCONTINUADO'})
+              .eq('sku', identifier);
+            success = true;
+          }
+        if (success) {
+          await LocalDbService.eliminarDeSyncQueue(id);
+        }
+      }
+    } catch (e) {
+      AppLogger.error('Error procesando sync_queue', tag: 'SYNC', error: e);
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Ventas
+  // ──────────────────────────────────────────────
+
+  // ELIMINADO: generarSiguienteCorrelativo local para evitar colisiones.
+  // La base de datos ahora asigna el número atómicamente mediante get_next_correlativo.
+
+  static Future<Venta?> registrarVenta({
+    required List<ItemCarrito> items,
+    required double total,
+    required String alias,
+    required String metodoPago,
+    required String tipoDocumento,
+    String? dniRuc,
+    String? nombreCliente,
+  }) async {
+    try {
+      final itemsData = items.map((i) => {
+        'sku': i.producto.id,
+        'nombre': i.producto.nombre,
+        'marca': i.producto.marca,
+        'cantidad': i.cantidad,
+        'presentacion_id': i.presentacion.id,
+        'presentacion_nombre': i.presentacion.name,
+        'unidades_totales': i.unidadesTotales,
+        'precio': i.precioActual,
+      }).toList();
+
+      // Calcular impuestos usando tasa de configuración
+      final ivaRate = await ConfigService.obtenerIGVActual();
+      final base = total / (1 + ivaRate);
+      final igvValue = total - base;
+
+      final response = await client.from('ventas').insert({
+        'correlativo': null, // Asignación automática en Servidor (SUNAT V2)
+        'serie': 'B001', 
+        'tipo_comprobante_cod': tipoDocumento == 'BOLETA' ? '03' : '01',
+        'items': itemsData,
+        'total': total,
+        'subtotal': base,
+        'operacion_gravada': base,
+        'igv': igvValue,
+        'alias_vendedor': alias,
+        'metodo_pago': metodoPago,
+        'tipo_documento': tipoDocumento,
+        'dni_ruc': dniRuc,
+        'nombre_cliente': nombreCliente,
+      }).select().single();
+
+      AppLogger.info('Venta registrada: ${response['correlativo']} total=S/$total', tag: 'VENTAS');
+
+      // Devolvemos el modelo hidratado con el correlativo real de la DB
+      return Venta.fromMap({
+        'id': response['id'].toString(),
+        'fecha': response['created_at'] ?? DateTime.now().toIso8601String(),
+        'tipoComprobante': tipoDocumento == 'BOLETA' ? 'boleta' : 'factura',
+        'documentoCliente': dniRuc ?? '00000000',
+        'nombreCliente': nombreCliente,
+        'correlativo': response['correlativo'],
+        'operacionGravada': (response['operacion_gravada'] ?? 0.0).toDouble(),
+        'igv': (response['igv'] ?? 0.0).toDouble(),
+        'total': (response['total'] ?? 0.0).toDouble(),
+        'serie': response['serie'] ?? 'B001',
+        'metodoPago': metodoPago.toLowerCase(), // Normalizar para el enum
+        'montoRecibido': total,
+        'vuelto': 0.0,
+        'items': itemsData,
+        'despachado': 0,
+      });
+    } catch (e) {
+      AppLogger.error('Error registrando venta', tag: 'VENTAS', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Productos
+  // ──────────────────────────────────────────────
+
+  static Future<bool> upsertProducto(
+    Producto p, {
+    bool isUpdate = false,
+    required String userRol,
+    required String userAlias,
+  }) async {
+    final bool isAdmin = userRol == 'ADMIN' || userRol == 'SERVER';
+    try {
+      final Map<String, dynamic> data = {
+        'sku': p.id,
+        'nombre': p.nombre,
+        'marca': p.marca,
+        'categoria': p.categoria,
+        'presentaciones': p.presentaciones.map((pres) => pres.toJson()).toList(),
+        'precio_base': p.precioBase,
+        'precio_mayorista': p.precioMayorista,
+        'precio_caja_12': p.getPrecioPresentacion('c12'),
+        'precio_caja_72': p.getPrecioPresentacion('c72'),
+        'precio_especial': p.getPrecioPresentacion('espe'),
+        'imagen_url': p.imagenPath,
+        'creado_por': userAlias,
+        'descripcion': p.descripcion,
+        'updated_at': DateTime.now().toIso8601String(),
+        'estado': isAdmin ? 'VERIFICADO' : 'PENDIENTE',
+      };
+
+      if (isUpdate) {
+        await client.from('productos').update(data).eq('sku', p.id);
+      } else {
+        await client.from('productos').insert(data);
+      }
+
+      AppLogger.info('Producto ${isUpdate ? "actualizado" : "creado"}: ${p.id}', tag: 'PRODUCTOS');
+      return true;
+    } catch (e) {
+      AppLogger.error('Error en upsert de producto', tag: 'PRODUCTOS', error: e);
+      return false;
+    }
+  }
+
+  static Future<List<Producto>> buscarProductos(String query) async {
+    try {
+      final response = await client
+          .from('productos')
+          .select()
+          .or('sku.ilike.%$query%,nombre.ilike.%$query%,marca.ilike.%$query%,categoria.ilike.%$query%')
+          .order('nombre');
+
+      final List<dynamic> responseList = response as List;
+      return responseList.map<Producto>((data) => mapToProducto(data as Map<String, dynamic>)).toList();
+    } catch (e) {
+      AppLogger.error('Error buscando productos', tag: 'PRODUCTOS', error: e);
+      return [];
+    }
+  }
+
+  static Future<List<Producto>> obtenerProductosParaAuditoria() async {
+    try {
+      final response = await client
+          .from('productos')
+          .select()
+          .eq('estado', 'PENDIENTE')
+          .order('updated_at', ascending: false);
+
+      final List<dynamic> responseList = response as List;
+      return responseList.map<Producto>((data) => mapToProducto(data as Map<String, dynamic>)).toList();
+    } catch (e) {
+      AppLogger.error('Error en auditoría', tag: 'PRODUCTOS', error: e);
+      return [];
+    }
+  }
+
+  static Future<bool> aprobarProducto(String sku, double pBase, double pMayorista) async {
+    try {
+      await client.from('productos').update({
+        'precio_base': pBase,
+        'precio_mayorista': pMayorista,
+        'precio_propuesto': null,
+        'precio_mayorista_propuesto': null,
+        'estado': 'VERIFICADO',
+      }).eq('sku', sku);
+      return true;
+    } catch (e) {
+      AppLogger.error('Error aprobando producto', tag: 'PRODUCTOS', error: e);
+      return false;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Helpers
+  // ──────────────────────────────────────────────
+
+  static Producto mapToProducto(Map<String, dynamic> data) {
+    // El id debe ser el UUID de Supabase (Art 5.2)
+    final id = (data['id'] ?? '').toString();
+    final sku = (data['sku'] ?? '').toString();
+
+    List<Presentacion> presentations = [];
+
+    try {
+      if (data['presentaciones'] != null) {
+        if (data['presentaciones'] is String) {
+          presentations = (jsonDecode(data['presentaciones']) as List)
+              .map((i) => Presentacion.fromJson(i))
+              .toList();
+        } else if (data['presentaciones'] is List) {
+          presentations = (data['presentaciones'] as List)
+              .map((i) => Presentacion.fromJson(Map<String, dynamic>.from(i)))
+              .toList();
+        }
+      }
+    } catch (e) {
+      AppLogger.warning('Error parseando presentaciones para sku=$sku: $e', tag: 'SYNC');
+    }
+
+    // Fallback a columnas individuales si presentaciones está vacío
+    if (presentations.isEmpty) {
+      final precioBase = (data['precio_base'] ?? data['precio'] ?? 0).toDouble();
+      final precioMayorista = (data['precio_mayorista'] ?? 0).toDouble();
+      presentations = [
+        Presentacion(id: 'unid', skuCode: sku, name: 'Unidad', conversionFactor: 1, barcode: sku, prices: [PricePoint(type: 'NORMAL', amount: precioBase)]),
+        if (precioMayorista > 0)
+          Presentacion(id: 'mayo', skuCode: '${sku}-MAYO', name: 'Mayorista', conversionFactor: 1, prices: [PricePoint(type: 'NORMAL', amount: precioMayorista)]),
+        if ((data['precio_caja_12'] ?? 0) > 0)
+          Presentacion(id: 'c12', skuCode: '${sku}-C12', name: 'Caja x12', conversionFactor: 12, prices: [PricePoint(type: 'NORMAL', amount: (data['precio_caja_12']).toDouble())]),
+        if ((data['precio_caja_72'] ?? 0) > 0)
+          Presentacion(id: 'c72', skuCode: '${sku}-C72', name: 'Caja x72', conversionFactor: 72, prices: [PricePoint(type: 'NORMAL', amount: (data['precio_caja_72']).toDouble())]),
+        if ((data['precio_especial'] ?? 0) > 0)
+          Presentacion(id: 'espe', skuCode: '${sku}-ESPE', name: 'Especial', conversionFactor: 1, prices: [PricePoint(type: 'NORMAL', amount: (data['precio_especial']).toDouble())]),
+      ];
+    }
+
+    return Producto(
+      id: id,
+      skuCode: sku,
+      nombre: (data['nombre'] ?? 'SIN NOMBRE').toString(),
+      marca: (data['marca'] ?? 'GENÉRICO').toString(),
+      categoria: (data['categoria'] ?? 'General').toString(),
+      presentaciones: presentations,
+      imagenPath: data['imagen_url']?.toString(),
+      estado: (data['estado'] ?? 'PENDIENTE').toString(),
+      creadoPor: data['creado_por']?.toString(),
+      descripcion: data['descripcion']?.toString(),
+      updatedAt: data['updated_at'] != null ? DateTime.tryParse(data['updated_at'].toString()) : null,
+    );
+  }
+
+  // ──────────────────────────────────────────────
+  // PATRÓN WATERFALL: Supabase primero, fallback SQLite
+  // ──────────────────────────────────────────────
+
+  /// Intenta guardar venta en Supabase primero.
+  /// Si éxito: retorna (true, docId)
+  /// Si falla: retorna (false, null) para que el cliente caiga a SQLite
+  /// 
+  /// IMPORTANTE: El cliente es responsable de guardar en SQLite si esto falla.
+  /// Patrón:
+  /// ```dart
+  /// final (success, docId) = await SupabaseService.insertarVentaWaterfall(venta);
+  /// if (!success) {
+  ///   await LocalDbService.guardarVentaPendienteAtomica(...);  // Fallback
+  /// }
+  /// ```
+  static Future<(bool success, String? docId)> insertarVentaWaterfall(Venta venta) async {
+    try {
+      // 1. Validar que hay conexión
+      final isOnline = await _checkConectividad();
+      if (!isOnline) {
+        AppLogger.warning('Sin conexión. Venta será guardada offline.', tag: 'WATERFALL');
+        return (false, null);
+      }
+
+      // 2. Preparar datos de documento
+      final docData = {
+        'id': venta.id,
+        'fecha': venta.fecha.toIso8601String(),
+        'tipo_comprobante': venta.tipoComprobante.name,
+        'documento_cliente': venta.documentoCliente,
+        'nombre_cliente': venta.nombreCliente,
+        'correlativo': venta.id,  // TODO: Reemplazar por RPC real
+        'operacion_gravada': venta.operacionGravada,
+        'igv': venta.igv,
+        'total': venta.total,
+        'serie': venta.serie,
+        'metodo_pago': venta.metodoPago.name,
+        'monto_recibido': venta.montoRecibido,
+        'vuelto': venta.vuelto,
+        'despachado': false,
+      };
+
+      // 3. Intenta insertar documento
+      final docRes = await client
+          .from('documents')
+          .insert(docData)
+          .select()
+          .single()
+          .timeout(const Duration(seconds: 30));
+
+      if (docRes == null || docRes['id'] == null) {
+        throw Exception('Response vacío al insertar documento');
+      }
+
+      final docId = docRes['id'] as String;
+
+      // 4. Insertar items de la venta
+      for (final item in venta.items) {
+        final itemData = {
+          'document_id': docId,
+          'product_id': item.producto.id,
+          'presentation_id': item.presentacion.id,
+          'cantidad': item.cantidad,
+          'precio_unitario': item.precioActual,
+          'subtotal': item.subtotal,
+          'manual_price_override': item.manualPriceOverride,
+        };
+
+        await client
+            .from('document_items')
+            .insert(itemData)
+            .timeout(const Duration(seconds: 15));
+      }
+
+      // 5. Log de éxito
+      AppLogger.info(
+        'Venta guardada en Supabase: $docId | Total: S/.${venta.total.toStringAsFixed(2)}',
+        tag: 'WATERFALL',
+      );
+
+      return (true, docId);
+    } on TimeoutException catch (e) {
+      AppLogger.warning(
+        'Timeout guardando en Supabase. Fallback a SQLite.',
+        tag: 'WATERFALL',
+      );
+      return (false, null);
+    } on PostgrestException catch (e) {
+      AppLogger.error(
+        'Error PostgreSQL al guardar venta: ${e.message}',
+        tag: 'WATERFALL',
+        error: e,
+      );
+      return (false, null);
+    } catch (e, st) {
+      AppLogger.error(
+        'Error inesperado en Waterfall sync',
+        tag: 'WATERFALL',
+        error: e,
+      );
+      debugPrint('Stack trace: $st');
+      return (false, null);
+    }
+  }
+
+  /// Verifica conectividad rápida
+  static Future<bool> _checkConectividad() async {
+    try {
+      // Intenta obtener la sesión actual con timeout corto
+      final _ = client.auth.currentSession;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+===
+import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:bipenc/data/models/producto.dart';
+import 'package:bipenc/data/models/presentation.dart';
+import 'package:bipenc/helpers/alias_helper.dart';
+import 'package:bipenc/services/local_db_service.dart';
+import 'package:bipenc/utils/app_logger.dart';
+import 'package:path/path.dart' as p;
+import 'package:bipenc/data/models/venta.dart';
+import 'package:bipenc/services/config_service.dart';
+import 'package:bipenc/core/constantes/categorias_producto.dart';
+
+class SupabaseService {
+  static final client = Supabase.instance.client;
+
+  /// Genera/obtiene el siguiente correlativo desde el RPC nativo.
+  /// IMPORTANTE: Ahora usa RPC 'generar_correlativo' en lugar de fallback timestamp.
+  /// Si el RPC falla, retorna un identificador temporal seguro pero LOGUEA WARNING.
+  static Future<String> generarSiguienteCorrelativo(String alias) async {
+    try {
+      AppLogger.debug(
+        'Llamando RPC generar_correlativo para alias: $alias',
+        tag: 'CORRELATIVO',
+      );
+
+      // Llamar RPC nativo
+      final res = await client.rpc(
+        'generar_correlativo',
+        params: {'alias': alias},
+      ).maybeSingle();
+
+      if (res != null && res['correlativo'] != null) {
+        final corrResult = res['correlativo'].toString();
+        AppLogger.info(
+          'Correlativo generado por RPC: $corrResult',
+          tag: 'CORRELATIVO',
+        );
+        return corrResult;
+      }
+
+      // Si RPC retorna null o sin campo correlativo
+      throw Exception('RPC retornó respuesta vacía');
+    } on PostgrestException catch (e) {
+      AppLogger.warning(
+        'Error PostgreSQL en RPC: ${e.message}. Usando fallback temporal.',
+        tag: 'CORRELATIVO',
+      );
+      return _generarCorrelativoFallback();
+    } on TimeoutException catch (e) {
+      AppLogger.warning(
+        'Timeout en RPC. Usando fallback temporal.',
+        tag: 'CORRELATIVO',
+      );
+      return _generarCorrelativoFallback();
+    } catch (e) {
+      AppLogger.error(
+        'Error inesperado en RPC: $e. Usando fallback temporal.',
+        tag: 'CORRELATIVO',
+        error: e,
+      );
+      return _generarCorrelativoFallback();
+    }
+  }
+
+  /// Fallback: Genera correlativo temporal si RPC falla
+  /// Usa timestamp + random para evitar colisiones
+  static String _generarCorrelativoFallback() {
+    final now = DateTime.now();
+    final timestamp = now.millisecondsSinceEpoch;
+    final random = (now.microsecond % 1000).toString().padLeft(3, '0');
+    final fallbackCorr = 'T-${timestamp % 1000000}-$random';
+    AppLogger.warning(
+      'Usando correlativo fallback: $fallbackCorr (NOTA: Esto NO debería suceder en producción)',
+      tag: 'CORRELATIVO',
+    );
+    return fallbackCorr;
+  }
+
+  // ──────────────────────────────────────────────
+  // Configuración Global y Versiones
+  // ──────────────────────────────────────────────
+
+  /// Obtiene la versión mínima requerida desde Supabase
+  static Future<String?> obtenerVersionMinima() async {
+    try {
+      final res = await client
+          .from('store_config')
+          .select('min_version')
+          .eq('id', 1)
+          .maybeSingle();
+      return res?['min_version']?.toString();
+    } catch (e) {
+      AppLogger.error('Error obteniendo min_version', tag: 'CONFIG', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Storage — Imágenes
+  // ──────────────────────────────────────────────
+
+  /// Sube la imagen al bucket 'productos' y retorna la URL pública.
+  static Future<String?> subirImagen(File imageFile) async {
+    try {
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${p.basename(imageFile.path)}';
+      final path = 'public/$fileName';
+
+      await client.storage.from('productos').upload(path, imageFile);
+
+      final String publicUrl = client.storage.from('productos').getPublicUrl(path);
+      AppLogger.info('Imagen subida: $publicUrl', tag: 'STORAGE');
+      return publicUrl;
+    } catch (e) {
+      AppLogger.error('Error subiendo imagen', tag: 'STORAGE', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Perfiles
+  // ──────────────────────────────────────────────
+
+  static Future<Perfil?> obtenerPerfil() async {
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) {
+        AppLogger.warning('currentUser es null', tag: 'PERFIL');
+        return null;
+      }
+
+      final response = await client
+          .from('perfiles')
+          .select()
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (response == null) {
+        AppLogger.warning('No se encontró fila en perfiles para userId: ${user.id}', tag: 'PERFIL');
+        return null;
+      }
+
+      AppLogger.info('Perfil: alias=${response['alias']} rol=${response['rol']}', tag: 'PERFIL');
+      return Perfil(
+        id: response['id'],
+        nombre: response['nombre'],
+        apellido: response['apellido'],
+        alias: response['alias'],
+        rol: response['rol'],
+        deviceId: response['device_id'],
+      );
+    } catch (e) {
+      AppLogger.error('Error obteniendo perfil', tag: 'PERFIL', error: e);
+      return null;
+    }
+  }
+
+  /// Crea un perfil mínimo de recuperación cuando el usuario tiene cuenta
+  /// Auth pero no tiene fila en la tabla perfiles.
+  static Future<Perfil?> crearPerfilDeRecuperacion() async {
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) return null;
+
+      final email = user.email ?? 'usuario';
+      final base = email.split('@').first;
+      final nombre = base.length > 1 ? base[0].toUpperCase() + base.substring(1) : base.toUpperCase();
+      const apellido = 'BiPenc';
+      final alias = AliasHelper.generarAlias(nombre, apellido);
+
+      // Primer perfil del sistema → SERVER, el resto → VENTAS
+      final countRes = await client.from('perfiles').select().count(CountOption.exact);
+      final bool isFirst = countRes.count == 0;
+      final String rol = isFirst ? 'SERVER' : 'VENTAS';
+
+      AppLogger.info('Creando perfil de recuperación: alias=$alias rol=$rol', tag: 'PERFIL');
+
+      await client.from('perfiles').insert({
+        'id': user.id,
+        'nombre': nombre,
+        'apellido': apellido,
+        'alias': alias,
+        'rol': rol,
+      });
+
+      return Perfil(id: user.id, nombre: nombre, apellido: apellido, alias: alias, rol: rol);
+    } catch (e) {
+      AppLogger.error('No se pudo crear perfil de recuperación', tag: 'PERFIL', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Autenticación
+  // ──────────────────────────────────────────────
+
+  static Future<AuthResponse?> iniciarSesion(String email, String password) async {
+    try {
+      final response = await client.auth.signInWithPassword(email: email, password: password);
+      AppLogger.info('Login OK: ${response.user?.email}', tag: 'AUTH');
+      return response;
+    } on AuthException catch (e) {
+      AppLogger.error('Error AuthException: ${e.message}', tag: 'AUTH');
+      rethrow;
+    } catch (e) {
+      AppLogger.error('Error inesperado en login', tag: 'AUTH', error: e);
+      return null;
+    }
+  }
+
+  static Future<String?> crearCuenta(String email, String password, String nombre, String apellido) async {
+    try {
+      final res = await client.auth.signUp(email: email, password: password);
+      final user = res.user;
+
+      if (user == null) return 'Error al crear la cuenta.';
+
+      if (res.session == null) {
+        return 'Cuenta creada. Revisa tu email para confirmar antes de ingresar.';
+      }
+
+      final exitoPerfil = await _crearPerfilEnBaseDeDatos(user.id, nombre, apellido);
+
+      if (exitoPerfil) return null;
+      return 'Cuenta creada, pero hubo un problema al configurar tu perfil.';
+    } on AuthException catch (e) {
+      if (e.message.contains('rate limit')) {
+        return 'Demasiados intentos. Intenta de nuevo en unos minutos.';
+      }
+      if (e.message.contains('already registered')) {
+        return 'Este correo ya está registrado.';
+      }
+      return e.message;
+    } catch (e) {
+      AppLogger.error('Error en registro', tag: 'AUTH', error: e);
+      if (e.toString().contains('FormatException')) {
+        return 'Error de servidor. Revisa tu conexión.';
+      }
+      return 'Error: $e';
+    }
+  }
+
+  static Future<bool> _crearPerfilEnBaseDeDatos(String userId, String nombre, String apellido) async {
+    try {
+      final alias = AliasHelper.generarAlias(nombre, apellido);
+
+      // Primer perfil del sistema → SERVER, el resto → VENTAS
+      final countRes = await client.from('perfiles').select().count(CountOption.exact);
+      final bool isFirst = countRes.count == 0;
+      final String rol = isFirst ? 'SERVER' : 'VENTAS';
+
+      await client.from('perfiles').insert({
+        'id': userId,
+        'nombre': nombre,
+        'apellido': apellido,
+        'alias': alias,
+        'rol': rol,
+      });
+      return true;
+    } catch (e) {
+      AppLogger.error('Error insertando perfil en DB', tag: 'AUTH', error: e);
+      return false;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Sincronización
+  // ──────────────────────────────────────────────
+
+  static Future<bool> sincronizarProductos() async {
+    try {
+      final response = await client.from('productos').select().order('nombre');
+      final lista = response as List;
+
+      if (lista.isEmpty) {
+        AppLogger.warning('sincronizarProductos: tabla "productos" devolvió 0 filas', tag: 'SYNC');
+        return true;
+      }
+
+      // 🔍 Log diagnóstico: imprime las claves de la primera fila para auditoría
+      final primeraFila = lista.first as Map<String, dynamic>;
+      AppLogger.info('Columnas recibidas de Supabase: ${primeraFila.keys.toList()}', tag: 'SYNC');
+      AppLogger.info('Primera fila raw: $primeraFila', tag: 'SYNC');
+
+      final List<Producto> productos = lista
+          .map<Producto>((row) => mapToProducto(row as Map<String, dynamic>))
+          .where((p) => p.id.isNotEmpty)
+          .toList();
+
+      try {
+        await LocalDbService.upsertProductos(productos);
+        AppLogger.info('${productos.length}/${lista.length} productos sincronizados', tag: 'SYNC');
+
+        // ── SYNC BIDIRECCIONAL: Detectar productos eliminados en la nube ──
+        // Obtener IDs de la nube
+        final cloudIds = productos.map((p) => p.id).toSet();
+        // Obtener IDs locales
+        final localCount = await LocalDbService.contarProductos();
+        if (localCount > 0) {
+          final localProducts = await LocalDbService.buscarLocal('');
+          final localIds = localProducts.map((p) => p.id).toSet();
+          // Productos que existen local pero ya no en la nube = eliminados
+          final deletedIds = localIds.difference(cloudIds);
+          for (final deletedId in deletedIds) {
+            await LocalDbService.eliminarProductoLocal(deletedId);
+            AppLogger.info(
+              'Producto $deletedId eliminado localmente (ya no existe en Supabase)',
+              tag: 'SYNC',
+            );
+          }
+          if (deletedIds.isNotEmpty) {
+            AppLogger.info(
+              '${deletedIds.length} productos eliminados por sync inverso',
+              tag: 'SYNC',
+            );
+          }
+        }
+      } catch (dbError) {
+        AppLogger.error('Fallo cr\u00EDtico insertando productos en SQLite local durante sincronizaci\u00F3n', tag: 'SYNC', error: dbError);
+        return false;
+      }
+      return true;
+    } catch (e, st) {
+      AppLogger.error('Error sincronizando productos: $e\n$st', tag: 'SYNC', error: e);
+      return false;
+    }
+  }
+
+  /// Categorías dinámicas (Mission CTO)
+  static Future<List<String>> obtenerCategorias() async {
+    try {
+      final res = await client.from('categorias').select('nombre').order('nombre');
+      return (res as List).map((row) => row['nombre'].toString()).toList();
+    } catch (e) {
+      AppLogger.warning('No se pudo obtener categorías de Supabase. Usando locales.', tag: 'SYNC');
+      return List.from(CategoriasProducto.lista);
+    }
+  }
+
+  static Future<void> agregarCategoria(String nombre) async {
+    try {
+      await client.from('categorias').upsert({'nombre': nombre}, onConflict: 'nombre');
+      AppLogger.info('Categoría agregada/actualizada: $nombre', tag: 'SYNC');
+    } catch (e) {
+      AppLogger.error('Error agregando categoría a Supabase', tag: 'SYNC', error: e);
+    }
+  }
+
+  static Future<void> subirVentasPendientes() async {
+    try {
+      final pendientes = await LocalDbService.obtenerVentasPendientes();
+      if (pendientes.isEmpty) return;
+
+      AppLogger.info('Subiendo ${pendientes.length} ventas pendientes...', tag: 'SYNC');
+      for (final venta in pendientes) {
+        try {
+          final itemsDecoded = jsonDecode(venta['items_json'] ?? '[]');
+          
+          await client.from('ventas').insert({
+            'correlativo': venta['correlativo'],
+            'serie': venta['serie'] ?? 'B001',
+            'tipo_comprobante_cod': (venta['correlativo']?.toString().contains('F') ?? false) ? '01' : '03',
+            'items': itemsDecoded,
+            'total': venta['total'],
+            'subtotal': venta['subtotal'],
+            'operacion_gravada': venta['subtotal'], // Blueprint compliance
+            'igv': venta['igv'],
+            'dni_cliente': venta['documento_cliente'],
+            'nombre_cliente': venta['nombre_cliente'],
+            'alias_vendedor': venta['alias_vendedor'],
+            'despachado': (venta['despachado'] ?? 0) == 1,
+          });
+          await LocalDbService.marcarVentaSincronizada(venta['id'] as int);
+        } catch (itemError) {
+          AppLogger.error('Error subiendo venta local ID ${venta['id']}', tag: 'SYNC', error: itemError);
+          await LocalDbService.registrarErrorSincronizacion(venta['id'] as int, itemError.toString());
+        }
+      }
+    } catch (e) {
+      AppLogger.error('Error general de cola de ventas pendientes', tag: 'SYNC', error: e);
+    }
+  }
+
+  /// Procesa la cola de sincronización (Stock y Eliminaciones).
+  static Future<void> procesarSyncQueue() async {
+    try {
+      final queue = await LocalDbService.obtenerSyncQueue();
+      if (queue.isEmpty) return;
+
+      AppLogger.info('Procesando sync_queue con ${queue.length} items...', tag: 'SYNC');
+      for (final item in queue) {
+        final id = item['id'] as int;
+        final tabla = item['tabla'] as String;
+        final identifier = item['identificador'] as String;
+        final accion = item['accion'] as String;
+
+        bool success = false;
+        try {
+          if (tabla == 'productos' && accion == 'DELETE') {
+            // Borrar de Supabase usando el ID del producto
+            await client.from('productos').delete().eq('sku', identifier);
+            AppLogger.info('Producto $identifier eliminado de Supabase vía sync_queue', tag: 'SYNC');
+            success = true;
+          }
+          // Agregar más acciones/tablas aquí cuando sea necesario
+        } catch (e) {
+          AppLogger.error('Error procesando sync_queue item $id: $e', tag: 'SYNC', error: e);
+        }
+
+        if (success) {
+          await LocalDbService.eliminarDeSyncQueue(id);
+        }
+      }
+    } catch (e) {
+      AppLogger.error('Error procesando sync_queue', tag: 'SYNC', error: e);
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Ventas
+  // ──────────────────────────────────────────────
+
+  // ELIMINADO: generarSiguienteCorrelativo local para evitar colisiones.
+  // La base de datos ahora asigna el número atómicamente mediante get_next_correlativo.
+
+  static Future<Venta?> registrarVenta({
+    required List<ItemCarrito> items,
+    required double total,
+    required String alias,
+    required String metodoPago,
+    required String tipoDocumento,
+    String? dniRuc,
+    String? nombreCliente,
+  }) async {
+    try {
+      final itemsData = items.map((i) => {
+        'sku': i.producto.id,
+        'nombre': i.producto.nombre,
+        'marca': i.producto.marca,
+        'cantidad': i.cantidad,
+        'presentacion_id': i.presentacion.id,
+        'presentacion_nombre': i.presentacion.name,
+        'unidades_totales': i.unidadesTotales,
+        'precio': i.precioActual,
+      }).toList();
+
+      // Calcular impuestos usando tasa de configuración
+      final ivaRate = await ConfigService.obtenerIGVActual();
+      final base = total / (1 + ivaRate);
+      final igvValue = total - base;
+
+      final response = await client.from('ventas').insert({
+        'correlativo': null, // Asignación automática en Servidor (SUNAT V2)
+        'serie': 'B001', 
+        'tipo_comprobante_cod': tipoDocumento == 'BOLETA' ? '03' : '01',
+        'items': itemsData,
+        'total': total,
+        'subtotal': base,
+        'operacion_gravada': base,
+        'igv': igvValue,
+        'alias_vendedor': alias,
+        'metodo_pago': metodoPago,
+        'tipo_documento': tipoDocumento,
+        'dni_ruc': dniRuc,
+        'nombre_cliente': nombreCliente,
+      }).select().single();
+
+      AppLogger.info('Venta registrada: ${response['correlativo']} total=S/$total', tag: 'VENTAS');
+
+      // Devolvemos el modelo hidratado con el correlativo real de la DB
+      return Venta.fromMap({
+        'id': response['id'].toString(),
+        'fecha': response['created_at'] ?? DateTime.now().toIso8601String(),
+        'tipoComprobante': tipoDocumento == 'BOLETA' ? 'boleta' : 'factura',
+        'documentoCliente': dniRuc ?? '00000000',
+        'nombreCliente': nombreCliente,
+        'correlativo': response['correlativo'],
+        'operacionGravada': (response['operacion_gravada'] ?? 0.0).toDouble(),
+        'igv': (response['igv'] ?? 0.0).toDouble(),
+        'total': (response['total'] ?? 0.0).toDouble(),
+        'serie': response['serie'] ?? 'B001',
+        'metodoPago': metodoPago.toLowerCase(), // Normalizar para el enum
+        'montoRecibido': total,
+        'vuelto': 0.0,
+        'items': itemsData,
+        'despachado': 0,
+      });
+    } catch (e) {
+      AppLogger.error('Error registrando venta', tag: 'VENTAS', error: e);
+      return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Productos
+  // ──────────────────────────────────────────────
+
+  static Future<bool> upsertProducto(
+    Producto p, {
+    bool isUpdate = false,
+    required String userRol,
+    required String userAlias,
+  }) async {
+    final bool isAdmin = userRol == 'ADMIN' || userRol == 'SERVER';
+    try {
+      final Map<String, dynamic> data = {
+        'sku': p.id,
+        'nombre': p.nombre,
+        'marca': p.marca,
+        'categoria': p.categoria,
+        'presentaciones': p.presentaciones.map((pres) => pres.toJson()).toList(),
+        'precio_base': p.precioBase,
+        'precio_mayorista': p.precioMayorista,
+        'precio_caja_12': p.getPrecioPresentacion('c12'),
+        'precio_caja_72': p.getPrecioPresentacion('c72'),
+        'precio_especial': p.getPrecioPresentacion('espe'),
+        'imagen_url': p.imagenPath,
+        'creado_por': userAlias,
+        'descripcion': p.descripcion,
+        'updated_at': DateTime.now().toIso8601String(),
+        'estado': isAdmin ? 'VERIFICADO' : 'PENDIENTE',
+      };
+
+      if (isUpdate) {
+        await client.from('productos').update(data).eq('sku', p.id);
+      } else {
+        await client.from('productos').insert(data);
+      }
+
+      AppLogger.info('Producto ${isUpdate ? "actualizado" : "creado"}: ${p.id}', tag: 'PRODUCTOS');
+      return true;
+    } catch (e) {
+      AppLogger.error('Error en upsert de producto', tag: 'PRODUCTOS', error: e);
+      return false;
+    }
+  }
+
+  static Future<List<Producto>> buscarProductos(String query) async {
+    try {
+      final response = await client
+          .from('productos')
+          .select()
+          .or('sku.ilike.%$query%,nombre.ilike.%$query%,marca.ilike.%$query%,categoria.ilike.%$query%')
+          .order('nombre');
+
+      final List<dynamic> responseList = response as List;
+      return responseList.map<Producto>((data) => mapToProducto(data as Map<String, dynamic>)).toList();
+    } catch (e) {
+      AppLogger.error('Error buscando productos', tag: 'PRODUCTOS', error: e);
+      return [];
+    }
+  }
+
+  static Future<List<Producto>> obtenerProductosParaAuditoria() async {
+    try {
+      final response = await client
+          .from('productos')
+          .select()
+          .eq('estado', 'PENDIENTE')
+          .order('updated_at', ascending: false);
+
+      final List<dynamic> responseList = response as List;
+      return responseList.map<Producto>((data) => mapToProducto(data as Map<String, dynamic>)).toList();
+    } catch (e) {
+      AppLogger.error('Error en auditoría', tag: 'PRODUCTOS', error: e);
+      return [];
+    }
+  }
+
+  static Future<bool> aprobarProducto(String sku, double pBase, double pMayorista) async {
+    try {
+      await client.from('productos').update({
+        'precio_base': pBase,
+        'precio_mayorista': pMayorista,
+        'precio_propuesto': null,
+        'precio_mayorista_propuesto': null,
+        'estado': 'VERIFICADO',
+      }).eq('sku', sku);
+      return true;
+    } catch (e) {
+      AppLogger.error('Error aprobando producto', tag: 'PRODUCTOS', error: e);
+      return false;
+    }
+  }
+
+  // ──────────────────────────────────────────────
+  // Helpers
+  // ──────────────────────────────────────────────
+
+  static Producto mapToProducto(Map<String, dynamic> data) {
+    // El id debe ser el UUID de Supabase (Art 5.2)
+    final id = (data['id'] ?? '').toString();
+    final sku = (data['sku'] ?? '').toString();
+
+    List<Presentacion> presentations = [];
+
+    try {
+      if (data['presentaciones'] != null) {
+        if (data['presentaciones'] is String) {
+          presentations = (jsonDecode(data['presentaciones']) as List)
+              .map((i) => Presentacion.fromJson(i))
+              .toList();
+        } else if (data['presentaciones'] is List) {
+          presentations = (data['presentaciones'] as List)
+              .map((i) => Presentacion.fromJson(Map<String, dynamic>.from(i)))
+              .toList();
+        }
+      }
+    } catch (e) {
+      AppLogger.warning('Error parseando presentaciones para sku=$sku: $e', tag: 'SYNC');
+    }
+
+    // Fallback a columnas individuales si presentaciones está vacío
+    if (presentations.isEmpty) {
+      final precioBase = (data['precio_base'] ?? data['precio'] ?? 0).toDouble();
+      final precioMayorista = (data['precio_mayorista'] ?? 0).toDouble();
+      presentations = [
+        Presentacion(id: 'unid', skuCode: sku, name: 'Unidad', conversionFactor: 1, barcode: sku, prices: [PricePoint(type: 'NORMAL', amount: precioBase)]),
+        if (precioMayorista > 0)
+          Presentacion(id: 'mayo', skuCode: '${sku}-MAYO', name: 'Mayorista', conversionFactor: 1, prices: [PricePoint(type: 'NORMAL', amount: precioMayorista)]),
+        if ((data['precio_caja_12'] ?? 0) > 0)
+          Presentacion(id: 'c12', skuCode: '${sku}-C12', name: 'Caja x12', conversionFactor: 12, prices: [PricePoint(type: 'NORMAL', amount: (data['precio_caja_12']).toDouble())]),
+        if ((data['precio_caja_72'] ?? 0) > 0)
+          Presentacion(id: 'c72', skuCode: '${sku}-C72', name: 'Caja x72', conversionFactor: 72, prices: [PricePoint(type: 'NORMAL', amount: (data['precio_caja_72']).toDouble())]),
+        if ((data['precio_especial'] ?? 0) > 0)
+          Presentacion(id: 'espe', skuCode: '${sku}-ESPE', name: 'Especial', conversionFactor: 1, prices: [PricePoint(type: 'NORMAL', amount: (data['precio_especial']).toDouble())]),
+      ];
+    }
+
+    return Producto(
+      id: id,
+      skuCode: sku,
+      nombre: (data['nombre'] ?? 'SIN NOMBRE').toString(),
+      marca: (data['marca'] ?? 'GENÉRICO').toString(),
+      categoria: (data['categoria'] ?? 'General').toString(),
+      presentaciones: presentations,
+      imagenPath: data['imagen_url']?.toString(),
+      estado: (data['estado'] ?? 'PENDIENTE').toString(),
+      creadoPor: data['creado_por']?.toString(),
+      descripcion: data['descripcion']?.toString(),
+      updatedAt: data['updated_at'] != null ? DateTime.tryParse(data['updated_at'].toString()) : null,
+    );
+  }
+
+  // ──────────────────────────────────────────────
+  // PATRÓN WATERFALL: Supabase primero, fallback SQLite
+  // ──────────────────────────────────────────────
+
+  /// Intenta guardar venta en Supabase primero.
+  /// Si éxito: retorna (true, docId)
+  /// Si falla: retorna (false, null) para que el cliente caiga a SQLite
+  /// 
+  /// IMPORTANTE: El cliente es responsable de guardar en SQLite si esto falla.
+  /// Patrón:
+  /// ```dart
+  /// final (success, docId) = await SupabaseService.insertarVentaWaterfall(venta);
+  /// if (!success) {
+  ///   await LocalDbService.guardarVentaPendienteAtomica(...);  // Fallback
+  /// }
+  /// ```
+  static Future<(bool success, String? docId)> insertarVentaWaterfall(Venta venta) async {
+    try {
+      // 1. Validar que hay conexión
+      final isOnline = await _checkConectividad();
+      if (!isOnline) {
+        AppLogger.warning('Sin conexión. Venta será guardada offline.', tag: 'WATERFALL');
+        return (false, null);
+      }
+
+      // 2. Preparar datos de documento
+      final docData = {
+        'id': venta.id,
+        'fecha': venta.fecha.toIso8601String(),
+        'tipo_comprobante': venta.tipoComprobante.name,
+        'documento_cliente': venta.documentoCliente,
+        'nombre_cliente': venta.nombreCliente,
+        'correlativo': venta.id,  // TODO: Reemplazar por RPC real
+        'operacion_gravada': venta.operacionGravada,
+        'igv': venta.igv,
+        'total': venta.total,
+        'serie': venta.serie,
+        'metodo_pago': venta.metodoPago.name,
+        'monto_recibido': venta.montoRecibido,
+        'vuelto': venta.vuelto,
+        'despachado': false,
+      };
+
+      // 3. Intenta insertar documento
+      final docRes = await client
+          .from('documents')
+          .insert(docData)
+          .select()
+          .single()
+          .timeout(const Duration(seconds: 30));
+
+      if (docRes == null || docRes['id'] == null) {
+        throw Exception('Response vacío al insertar documento');
+      }
+
+      final docId = docRes['id'] as String;
+
+      // 4. Insertar items de la venta
+      for (final item in venta.items) {
+        final itemData = {
+          'document_id': docId,
+          'product_id': item.producto.id,
+          'presentation_id': item.presentacion.id,
+          'cantidad': item.cantidad,
+          'precio_unitario': item.precioActual,
+          'subtotal': item.subtotal,
+          'manual_price_override': item.manualPriceOverride,
+        };
+
+        await client
+            .from('document_items')
+            .insert(itemData)
+            .timeout(const Duration(seconds: 15));
+      }
+
+      // 5. Log de éxito
+      AppLogger.info(
+        'Venta guardada en Supabase: $docId | Total: S/.${venta.total.toStringAsFixed(2)}',
+        tag: 'WATERFALL',
+      );
+
+      return (true, docId);
+    } on TimeoutException catch (e) {
+      AppLogger.warning(
+        'Timeout guardando en Supabase. Fallback a SQLite.',
+        tag: 'WATERFALL',
+      );
+      return (false, null);
+    } on PostgrestException catch (e) {
+      AppLogger.error(
+        'Error PostgreSQL al guardar venta: ${e.message}',
+        tag: 'WATERFALL',
+        error: e,
+      );
+      return (false, null);
+    } catch (e, st) {
+      AppLogger.error(
+        'Error inesperado en Waterfall sync',
+        tag: 'WATERFALL',
+        error: e,
+      );
+      debugPrint('Stack trace: $st');
+      return (false, null);
+    }
+  }
+
+  /// Verifica conectividad rápida
+  static Future<bool> _checkConectividad() async {
+    try {
+      // Intenta obtener la sesión actual con timeout corto
+      final _ = client.auth.currentSession;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+```
+
+---
+
+## Mejora 4: RLS en Tablas Desprotegidas
+
+**Migración SQL aplicada** en Supabase (`srxvjhzsvfpytwrjjtlz`):
+
+| Tabla | RLS | Política |
+|---|---|---|
+| `logs_precios` | ✅ Habilitado | SELECT + INSERT para `authenticated` |
+| `marcas_maestras` | ✅ Habilitado | SELECT para `authenticated` |
+| `unidades_medida` | ✅ Habilitado | SELECT para `authenticated` |
+| `afectacion_igv` | ✅ Habilitado | SELECT para `authenticated` |
+
+---
+
+## Mejora 5: Limpieza de Archivos
+
+| Archivo | Acción |
+|---|---|
+| [CORRECTION_SUMMARY.txt](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/CORRECTION_SUMMARY.txt) | 🗑️ Eliminado |
+| [QUICK_START.md](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/QUICK_START.md) | 🗑️ Eliminado |
+| [INSTRUCCIONES_COMPILACION.md](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/INSTRUCCIONES_COMPILACION.md) | 🗑️ Eliminado |
+| [GUIA_USUARIO_BETA.md](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/GUIA_USUARIO_BETA.md) | 📦 Movido a `.archived/` |
+| [README.md](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/README.md) | ✅ Mantenido |
+| [BETA_STATUS.md](file:///home/jhonataningesis/Documentos/JJGS/LIBRERIAPP/BiPenc/BETA_STATUS.md) | ✅ Mantenido |
+
+---
+
+## ⚠️ Notas Post-Sprint
+
+Los **security advisors** de Supabase aún reportan estas advertencias pre-existentes (no abordadas en este sprint):
+- 4 funciones sin `search_path` inmutable
+- Políticas `USING(true)` permisivas en `perfiles`, `productos`, `ventas`, `correlativos`, `validaciones_productos`
+- Extensión `pg_trgm` en schema `public`
+- Leaked password protection deshabilitado
+
+Estos puntos se pueden abordar en un sprint de seguridad futuro.
