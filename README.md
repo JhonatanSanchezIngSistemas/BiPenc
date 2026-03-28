@@ -55,7 +55,7 @@ graph LR
 
 ---
 
-## 📂 Estructura del Proyecto
+## ⚙️ Variables de Envío y Configuración
 
 Organizado bajo principios de **Clean Architecture** para mantenimiento a largo plazo:
 
