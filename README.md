@@ -85,7 +85,7 @@ lib/
 
 ---
 
-## ⚙️ Variables de Entorno y Configuración
+## ⚙️ Variables de Envío y Configuración
 
 El archivo `.env` controla el comportamiento de la app:
 - `SUPABASE_URL`: Endpoint de base de datos.
