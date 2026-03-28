@@ -20,7 +20,11 @@ import 'package:bipenc/modulos/caja/proveedor_caja.dart';
 import 'package:bipenc/servicios/cola_impresion.dart';
 import 'package:bipenc/utilidades/registro_app.dart';
 
-class ServicioImpresion {
+part 'impresion/impresion_conexion.dart';
+part 'impresion/impresion_imagen.dart';
+part 'impresion/impresion_tickets.dart';
+
+class ServicioImpresion with _ConexionImpresion, _ImpresionImagen, _ImpresionTickets {
   // ── SINGLETON ──
   static final ServicioImpresion _instance = ServicioImpresion._();
   factory ServicioImpresion() => _instance;

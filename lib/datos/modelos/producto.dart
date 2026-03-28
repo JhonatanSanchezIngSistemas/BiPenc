@@ -401,6 +401,7 @@ class Perfil {
   final String apellido;
   final String alias;
   final String rol;
+  final String estado;
   final String? deviceId;
 
   Perfil({
@@ -409,6 +410,7 @@ class Perfil {
     this.apellido = '',
     this.alias = '',
     this.rol = 'VENTAS',
+    this.estado = 'ACTIVO',
     this.deviceId,
   });
 

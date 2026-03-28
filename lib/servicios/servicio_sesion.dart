@@ -51,12 +51,24 @@ class ServicioSesion extends ChangeNotifier {
       }
 
       if (p != null) {
+        final estado = p.estado.toUpperCase();
+        if (estado != 'ACTIVO') {
+          RegistroApp.warn(
+              'Cuenta inactiva detectada. Cerrando sesión.',
+              tag: 'SESSION');
+          await ServicioBackend.cerrarSesion();
+          _perfil = null;
+          _isLoading = false;
+          notifyListeners();
+          return null;
+        }
         _perfil = Perfil(
           id: p.id,
           nombre: p.nombre,
           apellido: p.apellido,
           alias: p.alias,
           rol: _normalizeRole(p.rol),
+          estado: p.estado,
           deviceId: p.deviceId,
         );
         unawaited(ServicioDbLocal.logAudit(

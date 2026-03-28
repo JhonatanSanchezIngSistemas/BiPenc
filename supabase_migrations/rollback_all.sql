@@ -31,6 +31,10 @@ DROP TABLE IF EXISTS public.carts_live;
 ALTER TABLE IF EXISTS public.store_config
   DROP COLUMN IF EXISTS live_carts_enabled;
 
+-- Eliminar estado en perfiles
+ALTER TABLE IF EXISTS public.perfiles
+  DROP COLUMN IF EXISTS estado;
+
 -- Eliminar RPC de inserción atómica de ventas
 DROP FUNCTION IF EXISTS public.insert_venta_with_items(
   text, text, text, jsonb, jsonb, numeric, numeric, numeric, numeric, text,

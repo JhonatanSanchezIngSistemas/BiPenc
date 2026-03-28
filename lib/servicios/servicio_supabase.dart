@@ -587,6 +587,7 @@ class ServicioSupabase {
         apellido: response['apellido'],
         alias: response['alias'],
         rol: response['rol'],
+        estado: (response['estado'] ?? 'ACTIVO').toString(),
         deviceId: response['device_id'],
       );
     } catch (e) {
@@ -719,13 +720,15 @@ class ServicioSupabase {
             'apellido': apellido,
             'alias': candidate,
             'rol': rol,
+            'estado': 'ACTIVO',
           });
           return Perfil(
               id: user.id,
               nombre: nombre,
               apellido: apellido,
               alias: candidate,
-              rol: rol);
+              rol: rol,
+              estado: 'ACTIVO');
         } on PostgrestException catch (e) {
           if (e.code == '23505') {
             RegistroApp.warning(
@@ -821,6 +824,7 @@ class ServicioSupabase {
             'apellido': apellido,
             'alias': candidate,
             'rol': rol,
+            'estado': 'ACTIVO',
           });
           return true;
         } on PostgrestException catch (e) {

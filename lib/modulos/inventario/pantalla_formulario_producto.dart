@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +16,11 @@ import 'package:bipenc/servicios/servicio_sesion.dart';
 
 import 'package:bipenc/servicios/servicio_backend.dart';
 import 'package:bipenc/base/constantes/categorias_producto.dart';
+import 'componentes/borrador_presentacion.dart';
+import 'componentes/modal_camara_producto.dart';
+import 'componentes/seccion_foto_producto.dart';
+import 'componentes/seccion_datos_producto.dart';
+import 'componentes/seccion_precios_presentaciones.dart';
 
 class PantallaFormularioProducto extends StatefulWidget {
   final Producto? producto;
@@ -37,7 +41,7 @@ class _PantallaFormularioProductoState extends State<PantallaFormularioProducto>
   final _precioBaseCtrl = TextEditingController();
   final _precioMayoristaCtrl = TextEditingController();
   final _precioEspecialCtrl = TextEditingController();
-  final List<_BorradorPresentacion> _presentacionesExtra = [];
+  final List<BorradorPresentacion> _presentacionesExtra = [];
   final _descripcionCtrl = TextEditingController();
   String _categoriaSeleccionada = CategoriasProducto.lista.first;
   List<String> _categoriasDinamicas =
@@ -122,7 +126,7 @@ class _PantallaFormularioProductoState extends State<PantallaFormularioProducto>
     for (final pres in p.presentaciones) {
       if (pres.id == 'unid' || pres.id == 'mayo' || pres.id == 'espe') continue;
       _presentacionesExtra.add(
-        _BorradorPresentacion(
+        BorradorPresentacion(
           nombre: pres.name,
           factor: pres.conversionFactor.toStringAsFixed(0),
           precio: pres.getPriceByType('NORMAL').toStringAsFixed(2),
@@ -171,7 +175,7 @@ class _PantallaFormularioProductoState extends State<PantallaFormularioProducto>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.black,
-      builder: (ctx) => _ModalCamara(cameraService: _cameraService),
+      builder: (ctx) => ModalCamaraProducto(cameraService: _cameraService),
     );
 
     if (captured == null) return;
@@ -512,312 +516,59 @@ class _PantallaFormularioProductoState extends State<PantallaFormularioProducto>
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // ── Foto del Producto ──────────────────
-            Column(
-              children: [
-                Center(
-                  child: GestureDetector(
-                    onTap: _isProcesandoImagen ? null : _tomarYProcesarFoto,
-                    child: Container(
-                      width: 180,
-                      height: 180,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade900,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.teal, width: 2),
-                        image: _imagenFinal != null
-                            ? DecorationImage(
-                                image: FileImage(_imagenFinal!),
-                                fit: BoxFit.contain)
-                            : (widget.producto?.imagenPath
-                                        ?.startsWith('http') ??
-                                    false)
-                                ? DecorationImage(
-                                    image: NetworkImage(
-                                        widget.producto!.imagenPath!),
-                                    fit: BoxFit.contain)
-                                : null,
-                      ),
-                      child: _isProcesandoImagen
-                          ? const Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                CircularProgressIndicator(color: Colors.teal),
-                                SizedBox(height: 8),
-                                Text('Procesando...',
-                                    style: TextStyle(
-                                        color: Colors.white70, fontSize: 12)),
-                              ],
-                            )
-                          : _imagenFinal == null
-                              ? Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(Icons.camera_alt,
-                                        size: 50, color: Colors.teal),
-                                    const SizedBox(height: 8),
-                                    Text('Foto del producto',
-                                        style: TextStyle(
-                                            color: Colors.grey.shade400,
-                                            fontSize: 12)),
-                                  ],
-                                )
-                              : const Align(
-                                  alignment: Alignment.bottomRight,
-                                  child: Padding(
-                                    padding: EdgeInsets.all(8),
-                                    child: Icon(Icons.check_circle,
-                                        color: Colors.teal, size: 28),
-                                  ),
-                                ),
-                    ),
-                  ),
-                ),
-                if (_imagenFinal != null && !_isProcesandoImagen)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        TextButton.icon(
-                          onPressed: _ultimoCapturado == null
-                              ? null
-                              : () => _procesarImagen(_ultimoCapturado!),
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('REINTENTAR RECORTE',
-                              style: TextStyle(fontSize: 10)),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: () async {
-                            await ServicioCamara().toggleFlash();
-                            setState(() {});
-                          },
-                          icon: const Icon(Icons.flash_on,
-                              color: Colors.yellowAccent, size: 20),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
+            SeccionFotoProducto(
+              imagenLocal: _imagenFinal,
+              imagenUrl: widget.producto?.imagenPath,
+              isProcesando: _isProcesandoImagen,
+              onTomarFoto: _isProcesandoImagen ? null : _tomarYProcesarFoto,
+              onReintentarRecorte: _ultimoCapturado == null
+                  ? null
+                  : () => _procesarImagen(_ultimoCapturado!),
+              onToggleFlash: () async {
+                await ServicioCamara().toggleFlash();
+                setState(() {});
+              },
             ),
             const SizedBox(height: 24),
-
-            // ── SKU ───────────────────────────────
-            Row(
-              children: [
-                Expanded(
-                  child: _campo(_skuCtrl, 'SKU / Código', Icons.qr_code,
-                      hint: 'Ej: LAP-FA-001 (vacío = auto)'),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  style: IconButton.styleFrom(
-                      backgroundColor: Colors.teal,
-                      foregroundColor: Colors.black),
-                  onPressed: () async {
-                    final code =
-                        await openScanner(context, title: 'Escanear SKU');
-                    if (code != null) setState(() => _skuCtrl.text = code);
-                  },
-                  icon: const Icon(Icons.qr_code_scanner),
-                ),
-              ],
+            SeccionDatosProducto(
+              skuCtrl: _skuCtrl,
+              nombreCtrl: _nombreCtrl,
+              marcaCtrl: _marcaCtrl,
+              descripcionCtrl: _descripcionCtrl,
+              marcasSugeridas: _marcasSugeridas,
+              categorias: _categoriasDinamicas,
+              categoriaSeleccionada: _categoriaSeleccionada,
+              nuevaCategoriaLabel: _kNuevaCategoriaStr,
+              onEscanearSku: () async {
+                final code = await openScanner(context, title: 'Escanear SKU');
+                if (code != null) setState(() => _skuCtrl.text = code);
+              },
+              onNuevaCategoria: _mostrarDialogoSumaCategoria,
+              onCategoriaSeleccionada: (value) =>
+                  setState(() => _categoriaSeleccionada = value),
+              onEliminarCategoria: _categoriaSeleccionada.isEmpty
+                  ? () {}
+                  : _intentarEliminarCategoriaActual,
+              puedeEliminarCategoria: _categoriaSeleccionada.isNotEmpty,
+              onSugerirDescripcion: _sugerirDescripcionRapida,
+              onSeleccionarMarca: (m) =>
+                  setState(() => _marcaCtrl.text = m),
             ),
             const SizedBox(height: 14),
-
-            // ── Nombre ────────────────────────────
-            _campo(_nombreCtrl, 'Nombre del Producto', Icons.label_outline,
-                validator: (v) => v == null || v.trim().isEmpty
-                    ? 'El nombre es requerido'
-                    : null),
-            const SizedBox(height: 14),
-
-            // ── Marca (dinámica y persistente) ──────────────
-            _campo(_marcaCtrl, 'Marca', Icons.branding_watermark_outlined),
-            if (_marcasSugeridas.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _marcasSugeridas
-                    .where((m) => _marcaCtrl.text.trim().isEmpty
-                        ? true
-                        : m
-                            .toLowerCase()
-                            .contains(_marcaCtrl.text.toLowerCase()))
-                    .take(8)
-                    .map((m) => ActionChip(
-                          label: Text(m),
-                          onPressed: () => setState(() => _marcaCtrl.text = m),
-                        ))
-                    .toList(),
-              ),
-            ],
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _categoriaSeleccionada,
-                    dropdownColor: Colors.grey.shade900,
-                    style: const TextStyle(color: Colors.white),
-                    decoration:
-                        _inputDeco('Categoría', Icons.category_outlined),
-                    items: [
-                      ..._categoriasDinamicas.map(
-                          (c) => DropdownMenuItem(value: c, child: Text(c))),
-                      const DropdownMenuItem(
-                        value: _kNuevaCategoriaStr,
-                        child: Text(_kNuevaCategoriaStr,
-                            style: TextStyle(
-                                color: Colors.tealAccent,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v == _kNuevaCategoriaStr) {
-                        _mostrarDialogoSumaCategoria();
-                      } else {
-                        setState(() => _categoriaSeleccionada = v!);
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  style:
-                      IconButton.styleFrom(backgroundColor: Colors.redAccent),
-                  tooltip: 'Eliminar categoría',
-                  onPressed: _categoriaSeleccionada.isEmpty
-                      ? null
-                      : _intentarEliminarCategoriaActual,
-                  icon: const Icon(Icons.delete_outline, color: Colors.white),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // ── Precios ───────────────────────────
-            Row(
-              children: [
-                Expanded(
-                  child: _campoPrecio(_precioBaseCtrl, 'Precio Unitario *',
-                      validator: (v) => (double.tryParse(v ?? '') ?? 0) <= 0
-                          ? 'Requerido'
-                          : null),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _campoPrecio(_precioMayoristaCtrl, 'Precio Mayorista'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _campoPrecio(
-                      _precioEspecialCtrl, 'Precio Especial / Distribuidor'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _campo(_descripcionCtrl, 'Descripción', Icons.description_outlined,
-                hint: 'Detalles del producto...'),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: _sugerirDescripcionRapida,
-                icon: const Icon(Icons.auto_awesome, size: 16),
-                label: const Text('Sugerir descripción'),
-              ),
-            ),
-            const SizedBox(height: 14),
-            ExpansionTile(
-              collapsedIconColor: Colors.white70,
-              iconColor: Colors.tealAccent,
-              title: const Text('Presentaciones adicionales (dinámicas)',
-                  style: TextStyle(color: Colors.white)),
-              subtitle: const Text(
-                  'Opcional: agrega las que necesites (docena, pack, caja, resma...)',
-                  style: TextStyle(color: Colors.white54)),
-              children: [
-                ..._presentacionesExtra.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final p = entry.value;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.03),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _campo(
-                                  p.nombreCtrl,
-                                  'Nombre presentación ${index + 1}',
-                                  Icons.inventory_2_outlined,
-                                  hint: 'Ej: Pack x25 / Docena / Caja x50',
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Eliminar presentación',
-                                onPressed: () {
-                                  setState(() {
-                                    _presentacionesExtra[index].dispose();
-                                    _presentacionesExtra.removeAt(index);
-                                  });
-                                },
-                                icon: const Icon(Icons.delete_outline,
-                                    color: Colors.redAccent),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _campoNumero(
-                                  p.factorCtrl,
-                                  'Factor (unidades)',
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _campoPrecio(
-                                  p.precioCtrl,
-                                  'Precio presentación',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _presentacionesExtra.add(_BorradorPresentacion());
-                      });
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Agregar presentación'),
-                  ),
-                ),
-                const SizedBox(height: 6),
-              ],
+            SeccionPreciosPresentaciones(
+              precioBaseCtrl: _precioBaseCtrl,
+              precioMayoristaCtrl: _precioMayoristaCtrl,
+              precioEspecialCtrl: _precioEspecialCtrl,
+              presentaciones: _presentacionesExtra,
+              onAgregarPresentacion: () {
+                setState(() => _presentacionesExtra.add(BorradorPresentacion()));
+              },
+              onEliminarPresentacion: (index) {
+                setState(() {
+                  _presentacionesExtra[index].dispose();
+                  _presentacionesExtra.removeAt(index);
+                });
+              },
             ),
             const SizedBox(height: 90),
           ],
@@ -941,142 +692,4 @@ class _PantallaFormularioProductoState extends State<PantallaFormularioProducto>
     );
   }
 
-  Widget _campo(TextEditingController ctrl, String label, IconData icon,
-      {String? hint, String? Function(String?)? validator}) {
-    return TextFormField(
-      controller: ctrl,
-      validator: validator,
-      style: const TextStyle(color: Colors.white),
-      decoration: _inputDeco(label, icon, hint: hint),
-    );
-  }
-
-  Widget _campoPrecio(TextEditingController ctrl, String label,
-      {String? Function(String?)? validator}) {
-    return TextFormField(
-      controller: ctrl,
-      validator: validator,
-      style: const TextStyle(color: Colors.white),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: _inputDeco(label, Icons.attach_money).copyWith(
-        prefixText: 'S/. ',
-        prefixStyle:
-            const TextStyle(color: Colors.teal, fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-
-  Widget _campoNumero(TextEditingController ctrl, String label) {
-    return TextFormField(
-      controller: ctrl,
-      style: const TextStyle(color: Colors.white),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: _inputDeco(label, Icons.functions_outlined),
-    );
-  }
-
-  InputDecoration _inputDeco(String label, IconData icon, {String? hint}) =>
-      InputDecoration(
-        labelText: label,
-        hintText: hint,
-        labelStyle: const TextStyle(color: Colors.white54),
-        hintStyle: const TextStyle(color: Colors.white24),
-        prefixIcon: Icon(icon, color: Colors.teal),
-        filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.05),
-        border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.white12)),
-        enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.white12)),
-        focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.teal)),
-        errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Colors.red)),
-      );
-}
-
-class _BorradorPresentacion {
-  final TextEditingController nombreCtrl;
-  final TextEditingController factorCtrl;
-  final TextEditingController precioCtrl;
-
-  _BorradorPresentacion({
-    String nombre = '',
-    String factor = '',
-    String precio = '',
-  })  : nombreCtrl = TextEditingController(text: nombre),
-        factorCtrl = TextEditingController(text: factor),
-        precioCtrl = TextEditingController(text: precio);
-
-  void dispose() {
-    nombreCtrl.dispose();
-    factorCtrl.dispose();
-    precioCtrl.dispose();
-  }
-}
-
-// ── Modal de Cámara ───────────────────────────────────────────────────────────
-class _ModalCamara extends StatelessWidget {
-  final ServicioCamara cameraService;
-  const _ModalCamara({required this.cameraService});
-
-  @override
-  Widget build(BuildContext context) {
-    if (cameraService.controller == null) {
-      return const Center(child: CircularProgressIndicator(color: Colors.teal));
-    }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CameraPreview(cameraService.controller!),
-        // Guía de encuadre
-        Center(
-          child: Container(
-            width: 240,
-            height: 240,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.teal, width: 2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ),
-        const Positioned(
-          top: 60,
-          left: 0,
-          right: 0,
-          child: Text(
-              'Centra el producto en el recuadro\nsobre fondo liso para mejor resultado',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 12)),
-        ),
-        Positioned(
-          bottom: 50,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: FloatingActionButton.large(
-              backgroundColor: Colors.white,
-              onPressed: () async {
-                final file = await cameraService.takePicture();
-                if (context.mounted) Navigator.pop(context, file);
-              },
-              child: const Icon(Icons.camera, color: Colors.black, size: 40),
-            ),
-          ),
-        ),
-        Positioned(
-          top: 16,
-          right: 16,
-          child: IconButton(
-            icon: const Icon(Icons.close, color: Colors.white, size: 28),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ),
-      ],
-    );
-  }
 }

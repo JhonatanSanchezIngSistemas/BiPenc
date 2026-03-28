@@ -322,6 +322,35 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Usuario actualizado')));
             },
+            onInvite: (email, nombre, apellido, rol) async {
+              try {
+                await ServicioUsuariosSupabase.invitarUsuario(
+                    email: email, nombre: nombre, apellido: apellido, rol: rol);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Invitación enviada')));
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent));
+                }
+              }
+            },
+            onEstado: (id, estado) async {
+              try {
+                await ServicioUsuariosSupabase.actualizarEstado(id, estado);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Estado actualizado a $estado')));
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent));
+                }
+              }
+            },
           ),
           TabCarritos(
             carritos: _carritosLive,
