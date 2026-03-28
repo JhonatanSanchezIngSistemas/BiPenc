@@ -88,5 +88,6 @@ flutter run --release
 ---
 
 <div align="center">
-  <sub>Desarrollado con ❤️ por <b>Jhonatan Sanchez</b> - Arquitecto de Software & Ing. de Sistemas</sub>
+  <sub>Desarrollado con ❤️ por <b>Jhonatan Sanchez</b> - Arquitecto de Software & Ing. de Sistemas</sub><br/>
+  <sub><b>Versión:</b> 1.0.1+2 | <b>Sincronización:</b> 28 de Marzo, 2026</sub>
 </div>
