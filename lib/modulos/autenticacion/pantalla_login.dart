@@ -167,8 +167,12 @@ class _PantallaLoginState extends State<PantallaLogin> {
         if (res == null) {
           error = 'Error inesperado en el inicio de sesión.';
         } else {
-          await ServicioSesion().obtenerPerfil(forceRefresh: true);
-          _checkSession();
+          final perfil = await ServicioSesion().obtenerPerfil(forceRefresh: true);
+          if (perfil == null) {
+            error = 'Cuenta desactivada. Contacta al administrador.';
+          } else {
+            _checkSession();
+          }
         }
       }
     } on AuthException catch (e) {

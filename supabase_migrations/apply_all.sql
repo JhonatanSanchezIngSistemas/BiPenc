@@ -70,4 +70,7 @@
 \echo 'Applying 023_add_live_carts_enabled.sql'
 \i 023_add_live_carts_enabled.sql
 
+\echo 'Applying 024_add_estado_perfil.sql'
+\i 024_add_estado_perfil.sql
+
 \echo 'All migrations applied.'

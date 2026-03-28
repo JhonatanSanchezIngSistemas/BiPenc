@@ -23,6 +23,32 @@ class ServicioUsuariosSupabase {
     }
   }
 
+  /// Activa o desactiva un usuario (estado ACTIVO/INACTIVO).
+  static Future<void> actualizarEstado(String id, String estado) async {
+    await actualizarCampoPerfil(id, 'estado', estado.toUpperCase());
+  }
+
+  /// Invita/crea usuario vía función segura en backend (Edge Function).
+  /// Requiere una función `admin_invitar_usuario` con service role.
+  static Future<void> invitarUsuario({
+    required String email,
+    required String nombre,
+    required String apellido,
+    required String rol,
+  }) async {
+    try {
+      await _client.functions.invoke('admin_invitar_usuario', body: {
+        'email': email,
+        'nombre': nombre,
+        'apellido': apellido,
+        'rol': rol,
+      });
+    } catch (e) {
+      RegistroApp.error('Error invitando usuario', tag: 'USUARIOS', error: e);
+      rethrow;
+    }
+  }
+
   /// Actualización masiva de campos.
   static Future<void> actualizarDatosPerfil(String id, Map<String, dynamic> data) async {
     try {
