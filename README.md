@@ -1,93 +1,93 @@
+# 💎 BiPenc Diamond Edition
+
 <div align="center">
-  <img src="https://raw.githubusercontent.com/JhonatanSanchezIngSistemas/BiPenc/main/assets/logo/logo.png" width="120" height="120" alt="BiPenc Logo" />
-  
-  # BiPenc
-  ### 💎 Sistema Experto de Inventario & POS (Offline-First)
-  
-  [![Version](https://img.shields.io/badge/Version-1.0.1%2B2-7928CA?style=for-the-badge&logo=flutter&logoColor=white)](https://github.com/JhonatanSanchezIngSistemas/BiPenc)
-  [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS-0070F3?style=for-the-badge&logo=android&logoColor=white)](https://github.com/JhonatanSanchezIngSistemas/BiPenc)
-  [![Security](https://img.shields.io/badge/Security-AES--256--CBC-FF0080?style=for-the-badge&logo=lock&logoColor=white)](https://github.com/JhonatanSanchezIngSistemas/BiPenc)
-  
-  ---
-  
-  **BiPenc** no es solo un POS; es el núcleo operativo para negocios que no pueden permitirse detenerse. Diseñado con una arquitectura de **continuidad absoluta**, garantiza que cada venta y cada producto estén seguros, incluso en el corazón de la falta de conectividad.
-  
+  <img src="https://raw.githubusercontent.com/username/bipenc/main/assets/readme_hero.png" alt="BiPenc Hero" width="800"/>
+  <br/>
+  <p align="center">
+    <b>Sistema POS de Alto Rendimiento con Gestión de Pedidos por Imagen y OCR</b>
+    <br/>
+    <i>"La evolución definitiva de la gestión de librerías y comercios minoristas."</i>
+  </p>
 </div>
 
 ---
 
-## ✨ Características Premium
+<p align="center">
+  <img src="https://img.shields.io/badge/Flutter-3.19.0-blue.svg?style=for-the-badge&logo=flutter" alt="Flutter"/>
+  <img src="https://img.shields.io/badge/Dart-3.3.0-0175C2.svg?style=for-the-badge&logo=dart" alt="Dart"/>
+  <img src="https://img.shields.io/badge/Supabase-Backend-3ECF8E.svg?style=for-the-badge&logo=supabase" alt="Supabase"/>
+  <img src="https://img.shields.io/badge/Diamond-Edition-FFD700.svg?style=for-the-badge" alt="Edition"/>
+</p>
 
-### 🏢 Continuidad "Offline-First"
-Operación total sin internet. Sincronización inteligente en segundo plano mediante **Sync Queue V2**. Nunca pierdas una venta por problemas de red.
+## 🚀 Vision General
 
-### 🛡️ Seguridad de Datos de Grado Bancario
-- **Cifrado PII**: Nombres y direcciones protegidos bajo **AES-256-CBC**.
-- **Blind Indexing**: Búsqueda ultrarrápida de DNI/RUC mediante **HMAC-SHA256** sin exponer datos sensibles.
-- **Secure Storage**: Llaves maestras resguardadas en el hardware (Keystore/Keychain).
+**BiPenc Diamond Edition** es un ecosistema diseñado para digitalizar el caos de las listas de pedidos manuales. Utilizando algoritmos de procesamiento de imagen avanzados y OCR (Reconocimiento Óptico de Caracteres), BiPenc permite a los operarios capturar pedidos en papel y vincularlos instantáneamente a un inventario inteligente en la nube.
 
-### 🖨️ Ecosistema Térmico Avanzado
-Soporte nativo para impresoras **PT-210**. Algoritmo de **Dithering** propietario para logos nítidos y tickets profesionales optimizados para 58mm/80mm.
+### 🌟 Pilares "Diamond"
 
-### 📸 Visión Artificial (ML Kit)
-Detección inteligente de bordes, corrección de perspectiva y binarización adaptativa para la captura de listas de útiles y documentos físicos.
-
----
-
-## 🏗️ Arquitectura de Élite
-
-```mermaid
-graph LR
-    subgraph "Local Edge"
-        UI[Flutter UI] --- SQL[(SQLite Global)]
-        SQL --- Q[Sync Queue]
-    end
-    
-    subgraph "Cloud Core"
-        Q --> |Atómico| SB[Supabase DB]
-        SB --> |RLS Protected| SEC[Security Layer]
-    end
-    
-    style UI fill:#0070F3,color:#fff
-    style SB fill:#7928CA,color:#fff
-    style SQL fill:#000,color:#fff
-```
+- **📸 Digitalización Inteligente:** Captura listas de pedidos, aplica filtros de contraste y extrae texto para agilizar el POS.
+- **🛡️ Gobernanza Operativa:** Control de roles (RBAC) donde solo el Administrador puede realizar operaciones críticas de precios y eliminaciones.
+- **💼 Identidad Corporativa:** Gestión centralizada de RUC, Razón Social y Logos para comprobantes profesionales.
+- **📑 Reporting Analítico:** Cierres de caja automáticos con exportación a WhatsApp y PDF de alta calidad.
+- **🌑 Obsidian Design:** Interfaz Glassmorphism optimizada para entornos de alta productividad y fatiga visual reducida.
 
 ---
 
-## ⚙️ Variables de Envío y Configuración
+## 🏗️ Arquitectura del Sistema
 
-Organizado bajo principios de **Clean Architecture** para mantenimiento a largo plazo:
+El proyecto sigue un patrón **Clean Architecture** segmentado por módulos funcionales:
 
-- `lib/modulos/`: Dominios funcionales (Caja, Inventario, Pedidos).
-- `lib/servicios/`: Motores core (Impresión, Sincronización, OCR).
-- `lib/datos/`: Modelos atómicos y lógica de negocio.
-- `lib/base/`: Temas y configuraciones globales estandarizadas.
-
----
-
-## 🚀 Guía de Inicio Rápido
-
-### Requisitos
-- Flutter SDK `^3.5.0`
-- Android Studio / VS Code
-- Archivo `.env` configurado (Ver `.env.example`)
-
-### Instalación
 ```bash
-# 1. Clonar repositorio
-git clone https://github.com/JhonatanSanchezIngSistemas/BiPenc.git
-
-# 2. Instalar dependencias
-flutter pub get
-
-# 3. Iniciar en modo producción
-flutter run --release
+lib/
+├── datos/              # Modelos y DTOs persistentes
+├── servicios/          # Lógica de negocio y comunicación (Supabase, PDF, OCR)
+├── utilidades/         # Helpers transversales (Fiscal, Imagen, Logs)
+├── ui/                 # Componentes globales y temas Obsidian
+└── modulos/            # Funcionalidades aisladas
+    ├── administracion/ # Dashboard Admin y Cierre de Caja
+    ├── caja/           # Punto de Venta (POS)
+    ├── inventario/     # Gestión de 1000+ SKUs
+    └── pedidos/        # Listas por imagen y seguimiento
 ```
+
+---
+
+## 🛠️ Stack Tecnológico
+
+| Área | Tecnología |
+| :--- | :--- |
+| **Framework** | Flutter (Multiplatform: Android, Linux Desktop) |
+| **Base de Datos** | Supabase (PostgreSQL) + SQLite (Local Cache) |
+| **Autenticación** | Supabase Auth (Invites & Roles) |
+| **Procesamiento** | Google ML Kit (OCR) + Custom Image Filters |
+| **Reportes** | PDF Widgets + Share Plus |
+
+---
+
+## 🗺️ Roadmap de Implementación
+
+- [x] **v1.0.0:** Foundation (Supabase Sync & POS).
+- [x] **v1.1.0:** Diamond UI (Glassmorphism & Drawer).
+- [x] **v1.2.0:** Gobernanza Administrativa & Perfil de Negocio.
+- [ ] **v1.3.0:** Facturación Electrónica Nativa (OSE Integration).
+- [ ] **v1.4.0:** Analítica de Ventas con IA (Predicción de Stock).
+
+---
+
+## 🔧 Instalación y Desarrollo
+
+1. Clonar el repositorio.
+2. Configurar el archivo `.env` con `SUPABASE_URL` y `SUPABASE_ANON_KEY`.
+3. Ejecutar `flutter pub get`.
+4. Ejecutar el proyecto:
+   ```bash
+   flutter run -d linux # Para Desktop
+   flutter run -d [device_id] # Para Android
+   ```
 
 ---
 
 <div align="center">
   <sub>Desarrollado con ❤️ por <b>Jhonatan Sanchez</b> - Arquitecto de Software & Ing. de Sistemas</sub><br/>
-  <sub><b>Versión:</b> 1.0.1+2 | <b>Sincronización:</b> 28 de Marzo, 2026</sub>
+  <sub><b>Versión Actual:</b> 1.2.0 | <b>Última Actualización:</b> Marzo 2026</sub>
 </div>

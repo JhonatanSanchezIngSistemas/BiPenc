@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:bipenc/datos/modelos/pedido.dart';
 import 'package:bipenc/utilidades/registro_app.dart';
 import 'package:bipenc/servicios/servicio_backend.dart';
+import 'package:bipenc/servicios/servicio_sesion.dart';
 
 /// Servicio para gestionar listas de pedidos (order_lists)
 /// Consume tabla order_lists en Supabase
@@ -290,6 +291,14 @@ class ServicioPedidos {
     String? nuevoResponsable,
   }) async {
     try {
+      if (nuevoTotalLista != null &&
+          ServicioSesion().rol != RolesApp.admin) {
+        RegistroApp.warning(
+          'Intento no autorizado de editar total en pedido ${order.id}',
+          tag: 'ORDER_LIST',
+        );
+        return false;
+      }
       final totalLista = nuevoTotalLista ?? order.totalLista;
       final montoPagado = nuevoMontoPagado ?? order.montoAdelantado;
       final meta = order.meta.copyWith(
@@ -331,5 +340,16 @@ class ServicioPedidos {
       RegistroApp.error('Error cancelando lista', tag: 'ORDER_LIST', error: e);
       return false;
     }
+  }
+
+  /// Eliminar lista de pedidos (solo ADMIN).
+  /// Implementado como soft delete a estado CANCELADO.
+  Future<bool> eliminarPedido(String id) async {
+    if (ServicioSesion().rol != RolesApp.admin) {
+      RegistroApp.warning('Acceso denegado: eliminar pedido $id',
+          tag: 'ORDER_LIST');
+      return false;
+    }
+    return cancelPedido(id);
   }
 }

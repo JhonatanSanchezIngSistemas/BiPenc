@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../servicios/servicio_backend.dart';
+import 'componentes/menu_lateral.dart';
 
 class LayoutPrincipal extends StatefulWidget {
   final Widget child;
@@ -13,17 +14,12 @@ class LayoutPrincipal extends StatefulWidget {
 }
 
 class _LayoutPrincipalState extends State<LayoutPrincipal> {
-  Timer? _syncTimer;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   @override
   void initState() {
     super.initState();
     _checkForUpdates();
-  }
-
-  @override
-  void dispose() {
-    _syncTimer?.cancel();
-    super.dispose();
   }
 
   Future<void> _checkForUpdates() async {
@@ -51,7 +47,7 @@ class _LayoutPrincipalState extends State<LayoutPrincipal> {
       for (int i = 0; i < m.length; i++) {
         if (i >= c.length) return true;
         if (c[i] < m[i]) return true;
-        if (c[i] > m[i]) return false;
+        if (c[i] > m[i]) false;
       }
       return false;
     } catch (_) {
@@ -67,12 +63,12 @@ class _LayoutPrincipalState extends State<LayoutPrincipal> {
             Icon(Icons.system_update_alt, color: Colors.white),
             SizedBox(width: 12),
             Expanded(
-                child: Text('Actualización de seguridad disponible.',
+                child: Text('Actualización crítica disponible.',
                     style: TextStyle(fontWeight: FontWeight.bold))),
           ],
         ),
         backgroundColor: Colors.indigo,
-        duration: Duration(days: 1), // Persistente
+        duration: Duration(days: 1),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -81,53 +77,36 @@ class _LayoutPrincipalState extends State<LayoutPrincipal> {
   @override
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
-
-    final navItems = [
-      (
-        '/pos',
-        'Ventas',
-        const Icon(Icons.point_of_sale_outlined),
-        const Icon(Icons.point_of_sale)
-      ),
-      (
-        '/pedidos',
-        'Pedidos',
-        const Icon(Icons.list_alt_outlined),
-        const Icon(Icons.list_alt)
-      ),
-      (
-        '/inventario',
-        'Inventario',
-        const Icon(Icons.inventory_2_outlined),
-        const Icon(Icons.inventory_2)
-      ),
-      (
-        '/config_dashboard',
-        'Gestión',
-        const Icon(Icons.settings_outlined),
-        const Icon(Icons.settings)
-      ),
-    ];
-
-    int currentIndex = navItems.indexWhere((e) => location.startsWith(e.$1));
-    if (currentIndex == -1) currentIndex = 0;
+    
+    // Títulos dinámicos según ruta
+    String title = 'BiPenc';
+    if (location == '/') title = 'Inicio';
+    else if (location.startsWith('/pos')) title = 'Caja (POS)';
+    else if (location.startsWith('/pedidos')) title = 'Pedidos';
+    else if (location.startsWith('/inventario')) title = 'Inventario';
+    else if (location.startsWith('/admin')) title = 'Administración';
+    else if (location.startsWith('/boletas')) title = 'Reportes';
 
     return Scaffold(
-      body: widget.child,
-      floatingActionButton: null,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: currentIndex,
-        onDestinationSelected: (index) {
-          GoRouter.of(context).go(navItems[index].$1);
-        },
-        destinations: navItems
-            .map((e) => NavigationDestination(
-                  icon: e.$3,
-                  selectedIcon: e.$4,
-                  label: e.$2,
-                ))
-            .toList(),
+      key: _scaffoldKey,
+      appBar: AppBar(
+        title: Text(title),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0D111B),
+        leading: IconButton(
+          icon: const Icon(Icons.menu_rounded, color: Colors.white),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_none_rounded, color: Colors.white54),
+            onPressed: () {}, // Futuro: Notificaciones
+          ),
+        ],
       ),
+      drawer: const MenuLateral(),
+      body: widget.child,
     );
   }
 }
+

@@ -60,22 +60,9 @@ class _PantallaInicioState extends State<PantallaInicio> {
               await _statsFuture;
             },
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
               children: [
-                const Text(
-                  'Panel BiPenc',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Control rápido de ventas, pedidos y operación diaria',
-                  style: TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
                 FutureBuilder<_EstadisticasInicio>(
                   future: _statsFuture,
                   builder: (context, snap) {
@@ -139,37 +126,44 @@ class _PantallaInicioState extends State<PantallaInicio> {
                     );
                   },
                 ),
-                const SizedBox(height: 20),
-                const _TituloSeccion('Acciones Rápidas'),
                 const SizedBox(height: 10),
-                _FichaAccion(
-                  title: 'Nueva Venta',
-                  subtitle: 'Abrir POS y cobrar',
-                  icon: Icons.point_of_sale,
-                  color: Colors.teal,
-                  onTap: () => context.go('/pos'),
+                const _TituloSeccion('Acciones Rápidas'),
+                const SizedBox(height: 12),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.4,
+                  children: [
+                    _FichaAccionGrid(
+                      title: 'Venta POS',
+                      icon: Icons.point_of_sale,
+                      color: Colors.teal,
+                      onTap: () => context.go('/pos'),
+                    ),
+                    _FichaAccionGrid(
+                      title: 'Pedidos',
+                      icon: Icons.list_alt,
+                      color: Colors.orangeAccent,
+                      onTap: () => context.go('/pedidos'),
+                    ),
+                    _FichaAccionGrid(
+                      title: 'Inventario',
+                      icon: Icons.inventory_2_outlined,
+                      color: Colors.cyanAccent,
+                      onTap: () => context.go('/inventario'),
+                    ),
+                    _FichaAccionGrid(
+                      title: 'Reportes',
+                      icon: Icons.analytics_outlined,
+                      color: Colors.greenAccent,
+                      onTap: () => context.go('/boletas'),
+                    ),
+                  ],
                 ),
-                _FichaAccion(
-                  title: 'Listas Escolares',
-                  subtitle: 'Llegadas, pagos y prioridad',
-                  icon: Icons.list_alt,
-                  color: Colors.orangeAccent,
-                  onTap: () => context.go('/pedidos'),
-                ),
-                _FichaAccion(
-                  title: 'Inventario',
-                  subtitle: 'Crear y editar productos',
-                  icon: Icons.add_circle_outline,
-                  color: Colors.cyanAccent,
-                  onTap: () => context.go('/inventario'),
-                ),
-                _FichaAccion(
-                  title: 'Boletas y Reportes',
-                  subtitle: 'Reimpresión, anulación, caja',
-                  icon: Icons.analytics_outlined,
-                  color: Colors.greenAccent,
-                  onTap: () => context.go('/config_dashboard'),
-                ),
+                const SizedBox(height: 20),
               ],
             ),
           ),
@@ -246,16 +240,14 @@ class _TarjetaMetrica extends StatelessWidget {
   }
 }
 
-class _FichaAccion extends StatelessWidget {
+class _FichaAccionGrid extends StatelessWidget {
   final String title;
-  final String subtitle;
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
 
-  const _FichaAccion({
+  const _FichaAccionGrid({
     required this.title,
-    required this.subtitle,
     required this.icon,
     required this.color,
     required this.onTap,
@@ -263,30 +255,46 @@ class _FichaAccion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: const Color(0xFF141A29),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(12),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: const Color(0xFF141A29),
+          border: Border.all(color: Colors.white10),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF141A29),
+              color.withValues(alpha: 0.05),
+            ],
           ),
-          child: Icon(icon, color: color),
         ),
-        title: Text(
-          title,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ],
         ),
-        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white60)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.white30),
       ),
     );
   }

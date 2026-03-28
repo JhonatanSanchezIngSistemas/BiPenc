@@ -1,6 +1,6 @@
 part of '../servicio_impresion.dart';
 
-mixin _ImpresionImagen on ServicioImpresion {
+mixin _ImpresionImagen on _ConexionImpresion {
   /// Convierte un logo a monocromo (dithering Floyd-Steinberg) para ticket térmico.
   /// Devuelve bytes PNG listos para esc_pos.
   Future<List<int>?> logoMonocromo(String path) async {

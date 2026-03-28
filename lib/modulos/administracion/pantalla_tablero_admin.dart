@@ -16,6 +16,7 @@ import '../../servicios/servicio_db_local.dart';
 import 'componentes/tab_productos.dart';
 import 'componentes/tab_usuarios.dart';
 import 'componentes/tab_carritos.dart';
+import 'componentes/tab_cierre_caja.dart';
 
 class PantallaTableroAdmin extends StatefulWidget {
   const PantallaTableroAdmin({super.key});
@@ -40,6 +41,7 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
   double _ventasNubeTotalHoy = 0;
   double _ventasNubeEfectivo = 0;
   double _ventasNubeYape = 0;
+  int _ventasNubeConteoHoy = 0;
   List<Map<String, dynamic>> _ventasRecientesNube = [];
   bool _isLoadingMetricas = true;
 
@@ -60,7 +62,7 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
   void initState() {
     super.initState();
     _isAdmin = ServicioSesion().rol == RolesApp.admin;
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _tabController.addListener(_handleTabChange);
     
     if (_isAdmin) {
@@ -94,6 +96,9 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
         break;
       case 5:
         _subscribeCarritos();
+        break;
+      case 6:
+        _cargarMetricasNube(limitFrecuencia: true);
         break;
     }
   }
@@ -217,6 +222,7 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
           .gte('created_at', inicioDia);
       
       double total = 0, efe = 0, yap = 0;
+      int conteo = 0;
       for (final r in (res as List)) {
         if (r['anulado'] == true) continue;
         final t = (r['total'] as num?)?.toDouble() ?? 0;
@@ -228,11 +234,13 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
         } else if (m.contains('yape') || m.contains('plin')) {
           yap += t;
         }
+        conteo += 1;
       }
       
       _ventasNubeTotalHoy = total;
       _ventasNubeEfectivo = efe;
       _ventasNubeYape = yap;
+      _ventasNubeConteoHoy = conteo;
     } catch (e) {
       debugPrint('Error cargando metricas nube: $e');
     } finally {
@@ -294,6 +302,7 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
             Tab(icon: Icon(Icons.inventory_2_outlined), text: 'Productos'),
             Tab(icon: Icon(Icons.manage_accounts), text: 'Usuarios'),
             Tab(icon: Icon(Icons.shopping_cart_outlined), text: 'Carritos'),
+            Tab(icon: Icon(Icons.access_time), text: 'Cierre Caja'),
           ],
         ),
         actions: [
@@ -368,6 +377,13 @@ class _PantallaTableroAdminState extends State<PantallaTableroAdmin> with Single
                 }
               }
             },
+          ),
+          TabCierreCaja(
+            totalHoy: _ventasNubeTotalHoy,
+            efectivoHoy: _ventasNubeEfectivo,
+            yapePlinHoy: _ventasNubeYape,
+            conteoVentas: _ventasNubeConteoHoy,
+            onRefresh: _loadAll,
           ),
         ],
       ),

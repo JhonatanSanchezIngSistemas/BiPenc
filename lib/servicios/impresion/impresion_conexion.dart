@@ -1,6 +1,6 @@
 part of '../servicio_impresion.dart';
 
-mixin _ConexionImpresion on ServicioImpresion {
+mixin _ConexionImpresion on _ImpresionBase {
   // ── INIT ─────────────────────────────────────────────────────────────────
   void _initAutoConnect() {
     if (!_isPrintSupported()) return;
@@ -97,7 +97,7 @@ mixin _ConexionImpresion on ServicioImpresion {
         prefs.getString('bluetooth_mac');
     final macToConnect = (savedMac != null && savedMac.isNotEmpty)
         ? savedMac
-        : whitelistedMacFallback;
+        : ServicioImpresion.whitelistedMacFallback;
 
     final paired = await PrintBluetoothThermal.pairedBluetooths;
     final printer = paired.firstWhere(

@@ -95,6 +95,75 @@ class ServicioPdf {
     return file;
   }
 
+  static Future<File> generateResumenCierrePdf({
+    required DateTime fecha,
+    required double total,
+    required double efectivo,
+    required double yapePlin,
+    required int ventas,
+    PdfPageFormat pageFormat = PdfPageFormat.a4,
+  }) async {
+    final cfg = await ServicioDbLocal.getEmpresaConfig();
+    final empresa = _Empresa.fromMap(cfg);
+    final fechaStr = DateFormat('dd/MM/yyyy').format(fecha);
+
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: pageFormat,
+        margin: const pw.EdgeInsets.all(24),
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(empresa.razonSocial,
+                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+            pw.Text('RUC: ${empresa.ruc}', style: const pw.TextStyle(fontSize: 10)),
+            pw.Text(empresa.direccion, style: const pw.TextStyle(fontSize: 10)),
+            pw.SizedBox(height: 12),
+            pw.Text('CIERRE DE CAJA',
+                style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Fecha: $fechaStr', style: const pw.TextStyle(fontSize: 10)),
+            pw.SizedBox(height: 12),
+            _resumenLine('Ventas', ventas.toString()),
+            _resumenLine('Efectivo', 'S/. ${efectivo.toStringAsFixed(2)}'),
+            _resumenLine('Yape/Plin', 'S/. ${yapePlin.toStringAsFixed(2)}'),
+            pw.Divider(thickness: 0.7),
+            _resumenLine('TOTAL', 'S/. ${total.toStringAsFixed(2)}',
+                bold: true),
+            pw.SizedBox(height: 16),
+            if (empresa.footerText.isNotEmpty)
+              pw.Text(empresa.footerText, style: const pw.TextStyle(fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+
+    final tempDir = await getTemporaryDirectory();
+    final safeDate = fechaStr.replaceAll(RegExp(r'[^0-9]'), '');
+    final file = File('${tempDir.path}/BIPENC_CIERRE_$safeDate.pdf');
+    await file.writeAsBytes(await pdf.save());
+    return file;
+  }
+
+  static pw.Widget _resumenLine(String label, String value, {bool bold = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label,
+              style: pw.TextStyle(
+                  fontSize: 11,
+                  fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+          pw.Text(value,
+              style: pw.TextStyle(
+                  fontSize: 11,
+                  fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+        ],
+      ),
+    );
+  }
+
   static pw.Widget _header(_Empresa e, pw.MemoryImage? logo, String tipo,
       String correlativo, String fecha, String vendedor, String? metodoPago) {
     return pw.Row(

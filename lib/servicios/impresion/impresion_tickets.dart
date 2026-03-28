@@ -1,6 +1,6 @@
 part of '../servicio_impresion.dart';
 
-mixin _ImpresionTickets on ServicioImpresion {
+mixin _ImpresionTickets on _ConexionImpresion {
   // ── CONFIGURACIÓN DE NEGOCIO ──────────────────────────────────────────────
   Future<ConfiguracionNegocio> _getConfig() async {
     final prefs = await SharedPreferences.getInstance();
@@ -40,7 +40,7 @@ mixin _ImpresionTickets on ServicioImpresion {
       {String turnoEstado = 'Abierto'}) async {
     RegistroApp.info('Iniciando impresión de comprobante: ${venta.id}',
         tag: 'PRINT');
-    final vendedor = await _getVendedorAlias();
+    final vendedor = await ServicioImpresion.obtenerAliasVendedor();
     final correlativo = _formatCorrelativo(venta);
     return imprimirVenta(
       items: venta.items,
@@ -62,7 +62,7 @@ mixin _ImpresionTickets on ServicioImpresion {
       montoRecibido: venta.montoRecibido,
       vuelto: venta.vuelto,
       fechaVenta: venta.fecha,
-      incluirQr: !_disableQrOnThermal,
+      incluirQr: !ServicioImpresion._disableQrOnThermal,
       hashCpb: venta.hashCpb,
     );
   }
@@ -148,13 +148,14 @@ mixin _ImpresionTickets on ServicioImpresion {
     final prefs = await SharedPreferences.getInstance();
     final paperSize = (prefs.getString('thermal_paper_size') ?? '80').trim();
     final is80mm = paperSize == '80';
-    final lineWidth = is80mm ? _lineChars80 : _lineChars58;
+    final lineWidth =
+        is80mm ? ServicioImpresion._lineChars80 : ServicioImpresion._lineChars58;
     final profile = await CapabilityProfile.load();
     final generator =
         Generator(is80mm ? PaperSize.mm80 : PaperSize.mm58, profile);
     List<int> bytes = [];
     final safeCodePage = _sanitizeCodePage(
-      prefs.getString('thermal_code_page') ?? _forcedCodePage,
+      prefs.getString('thermal_code_page') ?? ServicioImpresion._forcedCodePage,
     );
 
     // ── INICIALIZACIÓN ───────────────────────────────────────────────────
@@ -174,7 +175,7 @@ mixin _ImpresionTickets on ServicioImpresion {
 
     // ── INFO TICKET ────────────────────────────────────────────────────────
     final fecha = fechaVenta ?? DateTime.now();
-    final fechaStr = formatFechaTicket(fecha);
+    final fechaStr = ServicioImpresion.formatFechaTicket(fecha);
 
     bytes += _printCentered(generator, fechaStr, width: lineWidth);
     bytes += generator.feed(1);
@@ -289,7 +290,7 @@ mixin _ImpresionTickets on ServicioImpresion {
         );
 
         bytes += generator.feed(1);
-        bytes += _printCentered(generator, 'Escanea el QR', width: lineWidth);
+    bytes += _printCentered(generator, 'Escanea el QR', width: lineWidth);
         bytes += generator.qrcode(
           qrContent,
           align: PosAlign.center,
@@ -322,7 +323,7 @@ mixin _ImpresionTickets on ServicioImpresion {
     bytes += generator.cut();
 
     // ── ENVÍO A IMPRESORA ────────────────────────────────────────────────
-    if (!conectado || debugForceError) {
+    if (!conectado || ServicioImpresion.debugForceError) {
       await ColaImpresion.encolarImpresion(
         bytes: bytes,
         tipoComprobante: tipo,
@@ -372,14 +373,15 @@ mixin _ImpresionTickets on ServicioImpresion {
     bytes += generator.reset();
     bytes += generator.setGlobalCodeTable(
       _sanitizeCodePage(
-          prefs.getString('thermal_code_page') ?? _forcedCodePage),
+          prefs.getString('thermal_code_page') ??
+              ServicioImpresion._forcedCodePage),
     );
     bytes += generator.text(ticketText,
         styles: const PosStyles(align: PosAlign.left));
     bytes += generator.feed(3);
     bytes += generator.cut();
 
-    if (!conectado || debugForceError) {
+    if (!conectado || ServicioImpresion.debugForceError) {
       await ColaImpresion.encolarImpresion(
           bytes: bytes, tipoComprobante: 'CIERRE', ventaId: '');
       return false;
@@ -406,9 +408,10 @@ mixin _ImpresionTickets on ServicioImpresion {
     final prefs = await SharedPreferences.getInstance();
     final paperSize = (prefs.getString('thermal_paper_size') ?? '80').trim();
     final is80mm = paperSize == '80';
-    final lineWidth = is80mm ? _lineChars80 : _lineChars58;
+    final lineWidth =
+        is80mm ? ServicioImpresion._lineChars80 : ServicioImpresion._lineChars58;
     final codePage = _sanitizeCodePage(
-      prefs.getString('thermal_code_page') ?? _forcedCodePage,
+      prefs.getString('thermal_code_page') ?? ServicioImpresion._forcedCodePage,
     );
 
     final profile = await CapabilityProfile.load();
@@ -436,18 +439,19 @@ mixin _ImpresionTickets on ServicioImpresion {
       width: lineWidth,
     );
     bytes += generator.hr(ch: '-');
-    bytes += generator
-        .text(_normalize(_lineJoin('|IZQUIERDA', 'DERECHA|', lineWidth)));
+    bytes += generator.text(
+        _normalize(ServicioImpresion._lineJoin('|IZQUIERDA', 'DERECHA|', lineWidth)));
     bytes += _printCentered(generator, 'CENTRADO OK', width: lineWidth);
     bytes +=
         generator.text(_normalize('1234567890123456789012345678901234567890'));
-    bytes += generator.text(_normalize(formatFechaTicket(DateTime.now())));
+    bytes += generator
+        .text(_normalize(ServicioImpresion.formatFechaTicket(DateTime.now())));
     bytes += generator.hr(ch: '-');
     bytes += _printCentered(generator, 'FIN DE PRUEBA', width: lineWidth);
     bytes += generator.feed(3);
     bytes += generator.cut();
 
-    if (!conectado || debugForceError) {
+    if (!conectado || ServicioImpresion.debugForceError) {
       await ColaImpresion.encolarImpresion(
         bytes: bytes,
         tipoComprobante: 'TEST',
@@ -475,17 +479,17 @@ mixin _ImpresionTickets on ServicioImpresion {
     return result;
   }
 
-  String _normalize(String input) => normalizeForEscPos(input);
+  String _normalize(String input) => ServicioImpresion.normalizeForEscPos(input);
 
   List<int> _printCentered(
     Generator generator,
     String text, {
     bool bold = false,
-    int width = _lineChars58,
+    int width = ServicioImpresion._lineChars58,
   }) {
     final out = <int>[];
     final normalized = _normalize(text);
-    final lines = _wrapText(normalized, width);
+    final lines = ServicioImpresion._wrapText(normalized, width);
     for (final line in lines) {
       out.addAll(generator.text(
         line,
@@ -513,7 +517,7 @@ mixin _ImpresionTickets on ServicioImpresion {
     required int amountCol,
     required int lineWidth,
   }) {
-    return _buildItemLinesCore(
+    return ServicioImpresion._buildItemLinesCore(
       nombre: item.producto.nombre,
       cantidad: item.cantidad,
       precioUnitario: item.precioActual,
@@ -526,11 +530,11 @@ mixin _ImpresionTickets on ServicioImpresion {
   }
 
   String _labelDocumento(String value) {
-    return _labelDocumentoStatic(value);
+    return ServicioImpresion._labelDocumentoStatic(value);
   }
 
   String _labelMetodoPago(String metodo) {
-    return _labelMetodoPagoStatic(metodo);
+    return ServicioImpresion._labelMetodoPagoStatic(metodo);
   }
 
   String _sanitizeCodePage(String cp) {

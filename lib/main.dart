@@ -24,6 +24,7 @@ import 'modulos/reportes/pantalla_boletas.dart';
 import 'modulos/ajustes/pantalla_panel_configuracion.dart';
 import 'package:bipenc/modulos/ajustes/pantalla_config_empresa.dart';
 import 'package:bipenc/modulos/ajustes/pantalla_config_impresora.dart';
+import 'package:bipenc/modulos/configuracion/pantalla_configuracion_negocio.dart';
 import 'modulos/ajustes/pantalla_correlativos.dart';
 import 'modulos/ajustes/pantalla_perfil.dart';
 import 'modulos/ajustes/pantalla_ajustes.dart';
@@ -324,6 +325,10 @@ final GoRouter _router = GoRouter(
         GoRoute(
           path: '/config_dashboard',
           builder: (context, state) => const PantallaPanelConfiguracion(),
+        ),
+        GoRoute(
+          path: '/config/negocio',
+          builder: (context, state) => const PantallaConfiguracionNegocio(),
         ),
         GoRoute(
           path: '/admin/dashboard',

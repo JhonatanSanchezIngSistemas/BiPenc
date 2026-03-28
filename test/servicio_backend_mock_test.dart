@@ -166,6 +166,15 @@ class MockProveedorBackend implements ProveedorBackend {
     required int expiresAtMs,
   }) async =>
       true;
+
+  @override
+  Future<bool?> obtenerLiveCartsEnabled() async => false;
+
+  @override
+  Future<void> upsertLiveCartsEnabled(bool enabled) async {}
+
+  @override
+  Future<void> upsertCarritoEnVivo(Map<String, dynamic> payload) async {}
   @override
   Stream<List<Map<String, dynamic>>> streamProductos() =>
       Stream.value([]);

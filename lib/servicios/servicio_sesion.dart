@@ -98,16 +98,29 @@ class ServicioSesion extends ChangeNotifier {
     return _perfil;
   }
 
+  /// Limpia la sesión local y cierra sesión en el backend.
+  Future<void> logoutCompleto() async {
+    try {
+      await ServicioBackend.cerrarSesion();
+    } catch (e) {
+      RegistroApp.error('Error cerrando sesión en backend', error: e);
+    } finally {
+      _perfil = null;
+      notifyListeners();
+      RegistroApp.info('Sesión y estado limpiados permanentemente', tag: 'SESSION');
+      unawaited(ServicioDbLocal.logAudit(
+        accion: 'LOGOUT',
+        usuario: 'guest',
+        detalle: 'Logout sincronizado completo',
+      ));
+    }
+  }
+
   /// Limpia la sesión (al hacer sign out).
   void limpiarSesion() {
     _perfil = null;
     notifyListeners();
-    RegistroApp.info('Sesión limpiada', tag: 'SESSION');
-    unawaited(ServicioDbLocal.logAudit(
-      accion: 'LOGOUT',
-      usuario: 'guest',
-      detalle: 'Logout manual',
-    ));
+    RegistroApp.info('Sesión limpiada localmente', tag: 'SESSION');
   }
 
   String _normalizeRole(String raw) {
