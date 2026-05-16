@@ -1,6 +1,6 @@
 import 'package:bcrypt/bcrypt.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:bipenc/utilidades/registro_app.dart';
 
 class ServicioSeguridad {
   // REFACTOR: hash y bandera de setup se guardan en secure storage para evitar fugas.
@@ -26,7 +26,7 @@ class ServicioSeguridad {
       final storedHash = await _secureStorage.read(key: _adminKey);
       if (storedHash == null) {
         _needsInitialSetup = true;
-        debugPrint('[ServicioSeguridad] No hay clave configurada');
+        RegistroApp.debug('[ServicioSeguridad] No hay clave configurada');
         return false;
       }
 
@@ -34,12 +34,13 @@ class ServicioSeguridad {
       final isMatch = BCrypt.checkpw(password, storedHash);
 
       if (!isMatch) {
-        debugPrint('[ServicioSeguridad] Acceso rechazado: password incorrecto');
+        RegistroApp.debug(
+            '[ServicioSeguridad] Acceso rechazado: password incorrecto');
       }
 
       return isMatch;
     } catch (e) {
-      debugPrint('[ServicioSeguridad] Error validando credenciales: $e');
+      RegistroApp.debug('[ServicioSeguridad] Error validando credenciales: $e');
       return false;
     }
   }
@@ -58,10 +59,10 @@ class ServicioSeguridad {
       await _secureStorage.write(key: _setupFlag, value: 'true');
       _needsInitialSetup = false;
 
-      debugPrint('[ServicioSeguridad] Clave actualizada correctamente');
+      RegistroApp.debug('[ServicioSeguridad] Clave actualizada correctamente');
       return true;
     } catch (e) {
-      debugPrint('[ServicioSeguridad] Error cambiando clave: $e');
+      RegistroApp.debug('[ServicioSeguridad] Error cambiando clave: $e');
       return false;
     }
   }
@@ -70,5 +71,18 @@ class ServicioSeguridad {
   Future<bool> necesitaOnboardingClave() async {
     final flag = await _secureStorage.read(key: _setupFlag);
     return _needsInitialSetup || flag != 'true';
+  }
+
+  // ──────────────────────────────────────────────
+  // Lógica de PIN (4 dígitos) para Perfiles
+  // ──────────────────────────────────────────────
+
+  /// Valida un PIN contra el perfil suministrado.
+  /// En esta etapa inicial, se compara como texto plano (4 dígitos).
+  bool validarPin(String pinSuministrado, String? pinCorrecto) {
+    if (pinCorrecto == null || pinCorrecto.isEmpty) return false;
+    final clean = pinSuministrado.replaceAll(RegExp(r'\D'), '');
+    if (clean.length != 4) return false;
+    return clean == pinCorrecto;
   }
 }

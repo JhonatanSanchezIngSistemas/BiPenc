@@ -4,6 +4,7 @@ import 'package:bipenc/datos/modelos/producto.dart';
 import 'package:bipenc/datos/modelos/venta.dart';
 import 'package:bipenc/servicios/servicio_supabase.dart';
 import 'package:bipenc/servicios/supabase/servicio_monitoreo.dart';
+import 'package:bipenc/datos/modelos/perfil.dart';
 
 class SesionBackend {
   final String id;
@@ -15,8 +16,8 @@ class SesionBackend {
 abstract class ProveedorBackend {
   Future<SesionBackend?> obtenerSesionActual();
   Future<void> cerrarSesion();
-  Future<Map<String, dynamic>?> getEmpresaConfig();
-  Future<void> upsertEmpresaConfig(Map<String, dynamic> values);
+  Future<Map<String, dynamic>?> getConfiguracionEmpresa();
+  Future<void> upsertConfiguracionEmpresa(Map<String, dynamic> values);
   Future<List<Map<String, dynamic>>> obtenerConfigCorrelativos();
   Future<void> upsertConfigCorrelativo({
     required String tipoDocumento,
@@ -39,14 +40,14 @@ abstract class ProveedorBackend {
   Future<String?> ensurePerfilConAlias();
   Future<Perfil?> crearPerfilDeRecuperacion();
   Future<AuthResponse?> iniciarSesion(String email, String password);
-  Future<String?> crearCuenta(
-      String email, String password, String nombre, String apellido);
   Future<double?> obtenerIgvRate();
+  Future<bool?> obtenerStockHabilitado();
   Future<void> upsertModoPrueba(bool enabled);
   Future<List<Producto>> buscarProductos(String query);
   Future<List<Producto>> buscarPorCodigoRemoto(String codigo);
   Future<(bool success, String? docId)> insertarVentaWaterfall(Venta venta);
   Future<bool> sincronizarProductos();
+  Future<DateTime?> obtenerUltimaActualizacionProductos();
   Producto mapToProducto(Map<String, dynamic> data);
   Future<List<String>> obtenerCategorias();
   Future<void> agregarCategoria(String nombre);
@@ -76,6 +77,7 @@ abstract class ProveedorBackend {
   Future<void> upsertCarritoEnVivo(Map<String, dynamic> payload);
   Stream<List<Map<String, dynamic>>> streamProductos();
   Future<bool> tieneConexionRemota();
+  Future<String?> obtenerCorreoActual();
 }
 
 class ProveedorSupabase implements ProveedorBackend {
@@ -97,12 +99,12 @@ class ProveedorSupabase implements ProveedorBackend {
   }
 
   @override
-  Future<Map<String, dynamic>?> getEmpresaConfig() =>
-      ServicioSupabase.getEmpresaConfig();
+  Future<Map<String, dynamic>?> getConfiguracionEmpresa() =>
+      ServicioSupabase.getConfiguracionEmpresa();
 
   @override
-  Future<void> upsertEmpresaConfig(Map<String, dynamic> values) =>
-      ServicioSupabase.upsertEmpresaConfig(values);
+  Future<void> upsertConfiguracionEmpresa(Map<String, dynamic> values) =>
+      ServicioSupabase.upsertConfiguracionEmpresa(values);
 
   @override
   Future<List<Map<String, dynamic>>> obtenerConfigCorrelativos() =>
@@ -121,7 +123,8 @@ class ProveedorSupabase implements ProveedorBackend {
       );
 
   @override
-  Future<String?> obtenerVersionMinima() => ServicioSupabase.obtenerVersionMinima();
+  Future<String?> obtenerVersionMinima() =>
+      ServicioSupabase.obtenerVersionMinima();
 
   @override
   Future<String?> subirImagen(File imageFile) =>
@@ -161,7 +164,8 @@ class ProveedorSupabase implements ProveedorBackend {
       ServicioSupabase.obtenerAliasVendedorActual();
 
   @override
-  Future<String?> ensurePerfilConAlias() => ServicioSupabase.ensurePerfilConAlias();
+  Future<String?> ensurePerfilConAlias() =>
+      ServicioSupabase.ensurePerfilConAlias();
 
   @override
   Future<Perfil?> crearPerfilDeRecuperacion() =>
@@ -172,11 +176,6 @@ class ProveedorSupabase implements ProveedorBackend {
       ServicioSupabase.iniciarSesion(email, password);
 
   @override
-  Future<String?> crearCuenta(
-          String email, String password, String nombre, String apellido) =>
-      ServicioSupabase.crearCuenta(email, password, nombre, apellido);
-
-  @override
   Future<double?> obtenerIgvRate() async {
     final res = await ServicioSupabase.client
         .from('store_config')
@@ -185,6 +184,17 @@ class ProveedorSupabase implements ProveedorBackend {
         .maybeSingle();
     if (res == null || res['igv_rate'] == null) return null;
     return (res['igv_rate'] as num).toDouble();
+  }
+
+  @override
+  Future<bool?> obtenerStockHabilitado() async {
+    final res = await ServicioSupabase.client
+        .from('store_config')
+        .select('stock_habilitado')
+        .eq('id', 1)
+        .maybeSingle();
+    if (res == null || res['stock_habilitado'] == null) return null;
+    return res['stock_habilitado'] == true;
   }
 
   @override
@@ -227,7 +237,12 @@ class ProveedorSupabase implements ProveedorBackend {
       ServicioSupabase.insertarVentaWaterfall(venta);
 
   @override
-  Future<bool> sincronizarProductos() => ServicioSupabase.sincronizarProductos();
+  Future<bool> sincronizarProductos() =>
+      ServicioSupabase.sincronizarProductos();
+
+  @override
+  Future<DateTime?> obtenerUltimaActualizacionProductos() =>
+      ServicioSupabase.obtenerUltimaActualizacionProductos();
 
   @override
   Producto mapToProducto(Map<String, dynamic> data) =>
@@ -258,7 +273,8 @@ class ProveedorSupabase implements ProveedorBackend {
       );
 
   @override
-  Future<void> subirVentasPendientes() => ServicioSupabase.subirVentasPendientes();
+  Future<void> subirVentasPendientes() =>
+      ServicioSupabase.subirVentasPendientes();
 
   @override
   Future<void> procesarSyncQueue() => ServicioSupabase.procesarSyncQueue();
@@ -301,11 +317,16 @@ class ProveedorSupabase implements ProveedorBackend {
   @override
   Stream<List<Map<String, dynamic>>> streamProductos() =>
       ServicioSupabase.client
-          .from('productos')
+          .from('products')
           .stream(primaryKey: ['id']).order('nombre');
 
   @override
   Future<bool> tieneConexionRemota() => ServicioSupabase.tieneConexionRemota();
+
+  @override
+  Future<String?> obtenerCorreoActual() async {
+    return ServicioSupabase.client.auth.currentUser?.email;
+  }
 }
 
 class ProveedorOracle implements ProveedorBackend {
@@ -324,10 +345,10 @@ class ProveedorOracle implements ProveedorBackend {
   Future<void> cerrarSesion() => _noImplementado();
 
   @override
-  Future<Map<String, dynamic>?> getEmpresaConfig() => _noImplementado();
+  Future<Map<String, dynamic>?> getConfiguracionEmpresa() => _noImplementado();
 
   @override
-  Future<void> upsertEmpresaConfig(Map<String, dynamic> values) =>
+  Future<void> upsertConfiguracionEmpresa(Map<String, dynamic> values) =>
       _noImplementado();
 
   @override
@@ -368,7 +389,8 @@ class ProveedorOracle implements ProveedorBackend {
       _noImplementado();
 
   @override
-  Future<String?> cambiarEmail({required String nuevoEmail}) => _noImplementado();
+  Future<String?> cambiarEmail({required String nuevoEmail}) =>
+      _noImplementado();
 
   @override
   Future<String> obtenerAliasVendedorActual() => _noImplementado();
@@ -384,12 +406,10 @@ class ProveedorOracle implements ProveedorBackend {
       _noImplementado();
 
   @override
-  Future<String?> crearCuenta(
-          String email, String password, String nombre, String apellido) =>
-      _noImplementado();
+  Future<double?> obtenerIgvRate() => _noImplementado();
 
   @override
-  Future<double?> obtenerIgvRate() => _noImplementado();
+  Future<bool?> obtenerStockHabilitado() => _noImplementado();
 
   @override
   Future<void> upsertModoPrueba(bool enabled) => _noImplementado();
@@ -409,6 +429,9 @@ class ProveedorOracle implements ProveedorBackend {
   Future<bool> sincronizarProductos() => _noImplementado();
 
   @override
+  Future<DateTime?> obtenerUltimaActualizacionProductos() => _noImplementado();
+
+  @override
   Producto mapToProducto(Map<String, dynamic> data) => _noImplementadoSync();
 
   @override
@@ -418,7 +441,8 @@ class ProveedorOracle implements ProveedorBackend {
   Future<void> agregarCategoria(String nombre) => _noImplementado();
 
   @override
-  Future<bool> eliminarCategoriaSiNoEstaEnUso(String nombre) => _noImplementado();
+  Future<bool> eliminarCategoriaSiNoEstaEnUso(String nombre) =>
+      _noImplementado();
 
   @override
   Future<bool> anularVentaEnNube({
@@ -473,6 +497,9 @@ class ProveedorOracle implements ProveedorBackend {
 
   @override
   Future<bool> tieneConexionRemota() => _noImplementado();
+
+  @override
+  Future<String?> obtenerCorreoActual() => _noImplementado();
 }
 
 class ServicioBackend {
@@ -487,11 +514,11 @@ class ServicioBackend {
 
   static Future<void> cerrarSesion() => _proveedor.cerrarSesion();
 
-  static Future<Map<String, dynamic>?> getEmpresaConfig() =>
-      _proveedor.getEmpresaConfig();
+  static Future<Map<String, dynamic>?> getConfiguracionEmpresa() =>
+      _proveedor.getConfiguracionEmpresa();
 
-  static Future<void> upsertEmpresaConfig(Map<String, dynamic> values) =>
-      _proveedor.upsertEmpresaConfig(values);
+  static Future<void> upsertConfiguracionEmpresa(Map<String, dynamic> values) =>
+      _proveedor.upsertConfiguracionEmpresa(values);
 
   static Future<List<Map<String, dynamic>>> obtenerConfigCorrelativos() =>
       _proveedor.obtenerConfigCorrelativos();
@@ -549,11 +576,10 @@ class ServicioBackend {
   static Future<AuthResponse?> iniciarSesion(String email, String password) =>
       _proveedor.iniciarSesion(email, password);
 
-  static Future<String?> crearCuenta(
-          String email, String password, String nombre, String apellido) =>
-      _proveedor.crearCuenta(email, password, nombre, apellido);
-
   static Future<double?> obtenerIgvRate() => _proveedor.obtenerIgvRate();
+
+  static Future<bool?> obtenerStockHabilitado() =>
+      _proveedor.obtenerStockHabilitado();
 
   static Future<void> upsertModoPrueba(bool enabled) =>
       _proveedor.upsertModoPrueba(enabled);
@@ -568,7 +594,11 @@ class ServicioBackend {
           Venta venta) =>
       _proveedor.insertarVentaWaterfall(venta);
 
-  static Future<bool> sincronizarProductos() => _proveedor.sincronizarProductos();
+  static Future<bool> sincronizarProductos() =>
+      _proveedor.sincronizarProductos();
+
+  static Future<DateTime?> obtenerUltimaActualizacionProductos() =>
+      _proveedor.obtenerUltimaActualizacionProductos();
 
   static Producto mapToProducto(Map<String, dynamic> data) =>
       _proveedor.mapToProducto(data);
@@ -640,4 +670,7 @@ class ServicioBackend {
       _proveedor.upsertCarritoEnVivo(payload);
 
   static Future<bool> tieneConexionRemota() => _proveedor.tieneConexionRemota();
+
+  static Future<String?> obtenerCorreoActual() =>
+      _proveedor.obtenerCorreoActual();
 }

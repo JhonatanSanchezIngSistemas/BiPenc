@@ -10,15 +10,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:bipenc/datos/modelos/producto.dart';
 import 'package:bipenc/datos/modelos/presentacion.dart';
 import 'package:bipenc/utilidades/alias.dart';
-import 'package:bipenc/servicios/servicio_db_local.dart';
+import 'package:bipenc/servicios/servicio_base_datos_local.dart';
 import 'package:bipenc/utilidades/registro_app.dart';
 import 'package:bipenc/utilidades/fiscal.dart';
 import 'package:path/path.dart' as p;
 import 'package:bipenc/datos/modelos/venta.dart';
 import 'package:bipenc/servicios/servicio_configuracion.dart';
-import 'package:bipenc/base/constantes/categorias_producto.dart';
-import 'package:bipenc/base/constantes/estados_producto.dart';
+import 'package:bipenc/arquitectura/constantes/categorias_producto.dart';
+import 'package:bipenc/arquitectura/constantes/estados_producto.dart';
 import 'package:bipenc/servicios/supabase/servicio_monitoreo.dart';
+import 'package:bipenc/datos/modelos/perfil.dart';
+import 'package:sqflite/sqflite.dart';
 
 part 'supabase/supabase_sincronizacion.dart';
 part 'supabase/supabase_ventas.dart';
@@ -28,8 +30,7 @@ class ServicioSupabase {
   @visibleForTesting
   static SupabaseClient? clientOverride;
 
-  static const String _productosLastFullSyncKey =
-      'productos_last_full_sync_ms';
+  static const String _productosLastFullSyncKey = 'productos_last_full_sync_ms';
   static const String _productosLastDeltaSyncKey =
       'productos_last_delta_sync_ms';
   static const Duration _productosFullSyncInterval = Duration(hours: 24);
@@ -62,8 +63,7 @@ class ServicioSupabase {
     } on PostgrestException catch (e) {
       // Si la tabla no existe en Supabase, devolvemos null silencioso
       if (e.code == '42P01') {
-        RegistroApp.warning(
-            'Tabla document_cache no existe; se omite fetch',
+        RegistroApp.warning('Tabla document_cache no existe; se omite fetch',
             tag: 'DOC_CACHE');
         return null;
       }
@@ -83,7 +83,7 @@ class ServicioSupabase {
     required String nombre,
     String? direccion,
     required int expiresAtMs,
-    }) async {
+  }) async {
     try {
       await client.from('document_cache').upsert({
         'numero': numero,
@@ -104,7 +104,7 @@ class ServicioSupabase {
   // ──────────────────────────────────────────────
   // Configuración de empresa
   // ──────────────────────────────────────────────
-  static Future<Map<String, dynamic>?> getEmpresaConfig() async {
+  static Future<Map<String, dynamic>?> getConfiguracionEmpresa() async {
     try {
       final res = await client
           .from('empresa_config')
@@ -119,7 +119,8 @@ class ServicioSupabase {
     }
   }
 
-  static Future<void> upsertEmpresaConfig(Map<String, dynamic> values) async {
+  static Future<void> upsertConfiguracionEmpresa(
+      Map<String, dynamic> values) async {
     try {
       await client.from('empresa_config').upsert(values..['id'] = 1);
     } catch (e) {
@@ -254,6 +255,7 @@ class ServicioSupabase {
     return null;
   }
 
+  // ignore: unused_element
   static Future<void> _insertVentaWithCompatibility(
     Map<String, dynamic> payload,
   ) async {
@@ -409,7 +411,8 @@ class ServicioSupabase {
       final res = await client.from('config_correlativos').select();
       return (res as List).cast<Map<String, dynamic>>();
     } catch (e) {
-      RegistroApp.error('Error obteniendo config_correlativos', tag: 'CORR', error: e);
+      RegistroApp.error('Error obteniendo config_correlativos',
+          tag: 'CORR', error: e);
       return [];
     }
   }
@@ -449,7 +452,8 @@ class ServicioSupabase {
       await client.rpc('reset_ventas');
       return true;
     } catch (e) {
-      RegistroApp.error('Error ejecutando reset_ventas', tag: 'RESET', error: e);
+      RegistroApp.error('Error ejecutando reset_ventas',
+          tag: 'RESET', error: e);
       return false;
     }
   }
@@ -495,7 +499,7 @@ class ServicioSupabase {
       final uploadFile = await _prepareUploadFile(imageFile);
       final fileName =
           '${DateTime.now().millisecondsSinceEpoch}_${p.basename(uploadFile.path)}';
-      final path = 'public/$fileName';
+      final path = fileName;
 
       await client.storage.from('productos').upload(path, uploadFile);
 
@@ -532,7 +536,8 @@ class ServicioSupabase {
         await client.storage.from('productos').upload(legacyPath, uploadFile);
         final String publicUrl =
             client.storage.from('productos').getPublicUrl(legacyPath);
-        RegistroApp.info('Avatar subido (fallback): $publicUrl', tag: 'STORAGE');
+        RegistroApp.info('Avatar subido (fallback): $publicUrl',
+            tag: 'STORAGE');
         return publicUrl;
       }
     } catch (e) {
@@ -582,18 +587,11 @@ class ServicioSupabase {
         return null;
       }
 
-      RegistroApp.info(
-          'Perfil: alias=${response['alias']} rol=${response['rol']}',
+      RegistroApp.debug(
+          'Perfil cargado: alias=${response['alias']} rol=${response['rol']}',
           tag: 'PERFIL');
-      return Perfil(
-        id: response['id'],
-        nombre: response['nombre'],
-        apellido: response['apellido'],
-        alias: response['alias'],
-        rol: response['rol'],
-        estado: (response['estado'] ?? 'ACTIVO').toString(),
-        deviceId: response['device_id'],
-      );
+
+      return Perfil.fromMap(response);
     } catch (e) {
       RegistroApp.error('Error obteniendo perfil', tag: 'PERFIL', error: e);
       return null;
@@ -616,17 +614,19 @@ class ServicioSupabase {
         'apellido': apellido.trim(),
         'alias': alias.trim().toUpperCase(),
       };
+
+      // Hardening: foto_url es el nombre oficial en la DB Diamond
       if (avatarUrl != null && avatarUrl.trim().isNotEmpty) {
-        payload['avatar_url'] = avatarUrl.trim();
+        payload['foto_url'] = avatarUrl.trim();
       }
 
       try {
         await client.from('perfiles').update(payload).eq('id', user.id);
       } on PostgrestException catch (e) {
-        // Compatibilidad si la columna avatar_url no existe aún.
-        if (_isMissingColumnError(e, 'avatar_url') &&
-            payload.containsKey('avatar_url')) {
-          payload.remove('avatar_url');
+        // Compatibilidad: si foto_url no existe, intenta avatar_url
+        if (_isMissingColumnError(e, 'foto_url') &&
+            payload.containsKey('foto_url')) {
+          payload['avatar_url'] = payload.remove('foto_url');
           await client.from('perfiles').update(payload).eq('id', user.id);
         } else {
           rethrow;
@@ -771,94 +771,14 @@ class ServicioSupabase {
     }
   }
 
-  static Future<String?> crearCuenta(
-      String email, String password, String nombre, String apellido) async {
-    try {
-      final res = await client.auth.signUp(email: email, password: password);
-      final user = res.user;
-
-      if (user == null) return 'Error al crear la cuenta.';
-
-      if (res.session == null) {
-        return 'Cuenta creada. Revisa tu email para confirmar antes de ingresar.';
-      }
-
-      final exitoPerfil =
-          await _crearPerfilEnBaseDeDatos(user.id, nombre, apellido);
-
-      if (exitoPerfil) return null;
-
-      // Fallback: intentar crear perfil mínimo si hubo conflicto de alias u otro fallo de DB.
-      final recovered = await crearPerfilDeRecuperacion();
-      if (recovered != null) return null;
-
-      return 'Cuenta creada, pero hubo un problema al configurar tu perfil.';
-    } on AuthException catch (e) {
-      if (e.message.contains('rate limit')) {
-        return 'Demasiados intentos. Intenta de nuevo en unos minutos.';
-      }
-      if (e.message.contains('already registered')) {
-        return 'Este correo ya está registrado.';
-      }
-      return e.message;
-    } catch (e) {
-      RegistroApp.error('Error en registro', tag: 'AUTH', error: e);
-      if (e.toString().contains('FormatException')) {
-        return 'Error de servidor. Revisa tu conexión.';
-      }
-      return 'Error: $e';
-    }
-  }
-
-  static Future<bool> _crearPerfilEnBaseDeDatos(
-      String userId, String nombre, String apellido) async {
-    try {
-      final alias = Alias.generarAlias(nombre, apellido);
-
-      // Hardening: rol por defecto siempre VENTAS. Elevación solo por RPC controlada.
-      const String rol = 'VENTAS';
-
-      for (var attempt = 0; attempt < 5; attempt++) {
-        final suffix = attempt == 0 ? '' : '${attempt + 1}';
-        final candidate = '$alias$suffix';
-        try {
-          await client.from('perfiles').insert({
-            'id': userId,
-            'nombre': nombre,
-            'apellido': apellido,
-            'alias': candidate,
-            'rol': rol,
-            'estado': 'ACTIVO',
-          });
-          return true;
-        } on PostgrestException catch (e) {
-          if (e.code == '23505') {
-            RegistroApp.warning(
-                'Alias duplicado ($candidate), reintentando con sufijo...',
-                tag: 'AUTH');
-            continue;
-          }
-          RegistroApp.error('Error insertando perfil en DB',
-              tag: 'AUTH', error: e);
-          return false;
-        }
-      }
-      RegistroApp.error('No se pudo generar alias único para perfil',
-          tag: 'AUTH');
-      return false;
-    } catch (e) {
-      RegistroApp.error('Error insertando perfil en DB', tag: 'AUTH', error: e);
-      return false;
-    }
-  }
-
   // ──────────────────────────────────────────────
   // Sincronización (delegada)
   // ──────────────────────────────────────────────
   static Future<bool> sincronizarProductos() => _sincronizarProductos();
   static Future<void> resolverConflictosSync() => _resolverConflictosSync();
   static Future<List<String>> obtenerCategorias() => _obtenerCategorias();
-  static Future<void> agregarCategoria(String nombre) => _agregarCategoria(nombre);
+  static Future<void> agregarCategoria(String nombre) =>
+      _agregarCategoria(nombre);
   static Future<bool> eliminarCategoriaSiNoEstaEnUso(String nombre) =>
       _eliminarCategoriaSiNoEstaEnUso(nombre);
 
@@ -874,6 +794,18 @@ class ServicioSupabase {
   // ──────────────────────────────────────────────
   // Ventas
   // ──────────────────────────────────────────────
+  // ──────────────────────────────────────────────
+  // Sincronización (Multi-Depósito V1)
+  // ──────────────────────────────────────────────
+  static Future<(bool ok, String error)> syncAll(
+          {bool soloProductos = false, bool soloVentas = false}) =>
+      _syncAll(soloProductos: soloProductos, soloVentas: soloVentas);
+
+  static Future<void> sincronizarDepositos() => _sincronizarDepositos();
+
+  static Future<void> sincronizarStockMultiDeposito() =>
+      _sincronizarStockMultiDeposito();
+
   static Future<Venta?> registrarVenta({
     required List<ItemCarrito> items,
     required double total,
@@ -926,28 +858,26 @@ class ServicioSupabase {
   static Future<List<Producto>> buscarPorCodigoRemoto(String codigo) =>
       _buscarPorCodigoRemoto(codigo);
 
+  static Future<DateTime?> obtenerUltimaActualizacionProductos() =>
+      _obtenerMaxUpdatedProductos();
+
   static Future<bool> vincularCodigoRemoto(
     String codigo,
-    String productoSku, {
-    String? variante,
+    String presentacionId, {
+    String? descripcion,
   }) =>
-      _vincularCodigoRemoto(codigo, productoSku, variante);
+      _vincularCodigoRemoto(codigo, presentacionId, descripcion);
 
   static Future<bool> desvincularCodigoRemoto(
     String codigo,
-    String productoSku,
+    String presentacionId,
   ) =>
-      _desvincularCodigoRemoto(codigo, productoSku);
+      _desvincularCodigoRemoto(codigo, presentacionId);
 
   static Future<List<Producto>> obtenerProductosParaAuditoria() =>
       _obtenerProductosParaAuditoria();
 
-  static Future<bool> aprobarProducto(
-    String sku,
-    double pBase,
-    double pMayorista,
-  ) =>
-      _aprobarProducto(sku, pBase, pMayorista);
+  static Future<bool> aprobarProducto(String id) => _aprobarProducto(id);
 
   // ──────────────────────────────────────────────
   // Helpers
