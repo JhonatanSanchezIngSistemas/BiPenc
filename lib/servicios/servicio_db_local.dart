@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
@@ -9,15 +10,15 @@ import '../utilidades/registro_app.dart';
 import 'servicio_cifrado.dart';
 import 'servicio_backend.dart';
 
-part 'db_local/migraciones_db_local.dart';
-part 'db_local/repositorio_auditoria_local.dart';
-part 'db_local/repositorio_config_local.dart';
-part 'db_local/repositorio_documentos_local.dart';
-part 'db_local/repositorio_productos_local.dart';
-part 'db_local/repositorio_ventas_local.dart';
-part 'db_local/repositorio_caja_local.dart';
-part 'db_local/repositorio_sync_local.dart';
-part 'db_local/repositorio_monitoreo_local.dart';
+part 'package:bipenc/servicios/db_local/migraciones_db_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_auditoria_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_config_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_documentos_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_productos_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_ventas_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_caja_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_sync_local.dart';
+part 'package:bipenc/servicios/db_local/repositorio_monitoreo_local.dart';
 
 class ServicioDbLocal {
   static Database? _db;

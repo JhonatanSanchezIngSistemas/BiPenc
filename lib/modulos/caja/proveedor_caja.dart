@@ -19,6 +19,7 @@ import '../../servicios/servicio_busqueda_documento.dart';
 
 export 'package:bipenc/datos/modelos/producto.dart';
 export 'package:bipenc/datos/modelos/metodo_pago.dart';
+import 'package:bipenc/datos/modelos/perfil.dart';
 
 // ── ProveedorCaja ──────────────────────────────────────────────────────────────
 class ProveedorCaja extends ChangeNotifier {
@@ -90,9 +91,13 @@ class ProveedorCaja extends ChangeNotifier {
   DateTime _lastLiveCartsCheck = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _liveCartMinInterval = Duration(seconds: 5);
   static const Duration _liveCartsCheckInterval = Duration(minutes: 5);
+  static const Duration _stockFlagTtl = Duration(minutes: 5);
   String? get orderListId => _orderListId;
   String? get orderFotoUrl => _orderFotoUrl;
   bool get hasPedidoActivo => _orderListId != null;
+
+  bool? _stockHabilitadoCache;
+  DateTime _lastStockFlagCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
   ProveedorCaja({bool testMode = false}) : _enableLiveCartSync = !testMode {
     if (!testMode) {
@@ -102,6 +107,65 @@ class ProveedorCaja extends ChangeNotifier {
       // _loadApertura(); // Removed as per instruction
       _startSyncAlertMonitor();
     }
+  }
+
+  Future<bool> _isStockHabilitado() async {
+    final now = DateTime.now();
+    if (_stockHabilitadoCache != null &&
+        now.difference(_lastStockFlagCheck) < _stockFlagTtl) {
+      return _stockHabilitadoCache!;
+    }
+    try {
+      final flag = await ServicioBackend.obtenerStockHabilitado()
+          .timeout(const Duration(seconds: 5));
+      _stockHabilitadoCache = flag ?? true;
+    } catch (e, st) {
+      RegistroApp.warn(
+        'No se pudo leer stock_habilitado; se asume true',
+        tag: 'STOCK',
+        error: e,
+        stackTrace: st,
+      );
+      _stockHabilitadoCache = true;
+    } finally {
+      _lastStockFlagCheck = now;
+    }
+    return _stockHabilitadoCache!;
+  }
+
+  Future<bool> _bloquearPorStock(Producto product) async {
+    final stockHabilitado = await _isStockHabilitado();
+    if (!stockHabilitado) return false;
+    return product.stockStatus.toUpperCase() == 'AGOTADO';
+  }
+
+  void _notificarStockBloqueado(Producto product) {
+    RegistroApp.warning('Bloqueado por stock: ${product.id}', tag: 'STOCK');
+    scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
+    scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text('Sin stock: ${product.nombre}'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _upsertItemCarrito(Producto product, Presentacion pres, int cantidad) {
+    final idx = items.indexWhere(
+      (i) => i.producto.id == product.id && i.presentacion.id == pres.id,
+    );
+    if (idx >= 0) {
+      items[idx].cantidad += cantidad;
+      final item = items.removeAt(idx);
+      items.insert(0, item);
+    } else {
+      items.insert(
+        0,
+        ItemCarrito(producto: product, cantidad: cantidad, presentacion: pres),
+      );
+    }
+    _aplicarReglaVolumen(0);
   }
 
 
@@ -382,28 +446,15 @@ class ProveedorCaja extends ChangeNotifier {
 
   Future<void> agregarProducto(Producto product,
       {int cantidad = 1, Presentacion? presentacion}) async {
+    if (await _bloquearPorStock(product)) {
+      _notificarStockBloqueado(product);
+      return;
+    }
     final selectedPres = presentacion ??
         (product.presentaciones.isNotEmpty
             ? product.presentaciones.first
             : Presentacion.unit);
-
-    final idx = items.indexWhere((i) =>
-        i.producto.id == product.id && i.presentacion.id == selectedPres.id);
-    if (idx >= 0) {
-      items[idx].cantidad += cantidad;
-      final item = items.removeAt(idx);
-      items.insert(0, item);
-      _aplicarReglaVolumen(0);
-    } else {
-      items.insert(
-          0,
-          ItemCarrito(
-            producto: product,
-            cantidad: cantidad,
-            presentacion: selectedPres,
-          ));
-      _aplicarReglaVolumen(0);
-    }
+    _upsertItemCarrito(product, selectedPres, cantidad);
     notifyListeners();
     _scheduleLiveCartSync();
   }
@@ -446,6 +497,10 @@ class ProveedorCaja extends ChangeNotifier {
   Future<void> actualizarCantidad(int index, int delta) async {
     if (index < 0 || index >= items.length) return;
 
+    if (delta > 0 && await _bloquearPorStock(items[index].producto)) {
+      _notificarStockBloqueado(items[index].producto);
+      return;
+    }
     final nueva = items[index].cantidad + delta;
     if (nueva > 0) {
       items[index].cantidad = nueva;
