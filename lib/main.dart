@@ -5,8 +5,6 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'base/llaves.dart';
 import 'utilidades/registro_app.dart';
@@ -40,6 +38,40 @@ import 'servicios/servicio_actualizacion.dart';
 import 'ui/modales/dialogo_actualizacion.dart';
 import 'ui/layout_principal.dart';
 import 'ui/guardia_sesion.dart';
+
+bool _isPublicRoute(String path) =>
+    path == '/splash' || path == '/login';
+
+bool _isProtectedPosRoute(String path) =>
+    path == '/pos' || path.startsWith('/pos/');
+
+bool _isProfileRoute(String path) =>
+    path == '/settings/profile' || path.startsWith('/settings/profile/');
+
+bool _isAdminRoute(String path) =>
+    path == '/admin/dashboard' || path.startsWith('/admin/dashboard');
+
+Future<String?> _routerRedirect(BuildContext context, GoRouterState state) async {
+  final path = state.matchedLocation;
+  if (_isPublicRoute(path)) return null;
+
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null && _isProtectedPosRoute(path)) return '/login';
+
+  if (user != null && path == '/login') return '/pos';
+
+  if (user == null) return null;
+
+  final perfil = await ServicioSesion().obtenerPerfil();
+  final alias = perfil?.alias.trim() ?? '';
+  final needsOnboarding = alias.isEmpty || alias.toUpperCase() == 'INVITADO';
+  if (needsOnboarding && !_isProfileRoute(path)) return '/settings/profile';
+
+  final isAdmin = ServicioSesion().rol == RolesApp.admin;
+  if (_isAdminRoute(path) && !isAdmin) return '/pos';
+
+  return null;
+}
 // =====================================================
 // GLOBAL ERROR CATCHER (Modo Debug Extremo)
 // =====================================================
@@ -152,21 +184,6 @@ Future<_ResultadoInicio> _bootstrapApp() async {
   try {
     debugPrint('🚀 [BOOT] Iniciando bootstrap...');
 
-    // 0. SQLite para desktop (Linux/Windows/macOS)
-    if (!kIsWeb) {
-      try {
-        if (defaultTargetPlatform == TargetPlatform.linux || 
-            defaultTargetPlatform == TargetPlatform.windows || 
-            defaultTargetPlatform == TargetPlatform.macOS) {
-          sqfliteFfiInit();
-          databaseFactory = databaseFactoryFfi;
-          debugPrint('✅ [BOOT] Sqflite FFI inicializado correctamente vía TargetPlatform');
-        }
-      } catch (e) {
-        debugPrint('⚠️ [BOOT] FFI Falló pero se capturó: $e');
-      }
-    }
-    
     // 1. Variables de entorno
     debugPrint('🚀 [BOOT] Cargando dotenv...');
     await _safeLoadDotenv();
@@ -207,29 +224,7 @@ Future<_ResultadoInicio> _bootstrapApp() async {
 // ========================================
 
 final GoRouter _router = GoRouter(
-  redirect: (context, state) {
-    final session = ServicioSesion();
-    final isAdmin = session.rol == RolesApp.admin;
-    final path = state.matchedLocation;
-
-    // Único cordón sanitario: dashboard admin
-    if ((path == '/admin/dashboard' || path.startsWith('/admin/dashboard')) &&
-        !isAdmin) {
-      debugPrint('⛔ ADMIN ONLY: $path');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
-        scaffoldMessengerKey.currentState?.showSnackBar(
-          const SnackBar(
-            content: Text('Ruta exclusiva Admin'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      });
-      return '/pos';
-    }
-    return null;
-  },
+  redirect: _routerRedirect,
   initialLocation: '/splash', // Mostramos logo mientras cargamos
   routes: [
     GoRoute(

@@ -10,6 +10,10 @@ class GuardiaSesion extends StatelessWidget {
 
   const GuardiaSesion({super.key, required this.child});
 
+  void _registrarActividad(GestorSesion session) {
+    if (!session.bloqueado) session.registrarActividad();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<GestorSesion>(
@@ -18,9 +22,9 @@ class GuardiaSesion extends StatelessWidget {
           return _PantallaBloqueo(session: session);
         }
         return Listener(
-          onPointerDown: (_) {
-            if (!session.bloqueado) session.registrarActividad();
-          },
+          onPointerDown: (_) => _registrarActividad(session),
+          onPointerMove: (_) => _registrarActividad(session),
+          onPointerSignal: (_) => _registrarActividad(session),
           behavior: HitTestBehavior.translucent,
           child: child,
         );
