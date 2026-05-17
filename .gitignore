@@ -53,3 +53,9 @@ android/key.properties
 
 # Artifacts / generated outputs
 artefactos/
+
+# Graphify outputs (generated)
+graphify-out/
+
+# Local test logs
+test_output.txt
