@@ -1,0 +1,46 @@
+name: BiPenc Web Compatibility Check
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  web_dry_run:
+    name: Check Web Compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Verify Web Compatibility
+        # flutter build web asegura que no haya errores de compilacion
+        # introducidos por librerias no compatibles con web (ej. sqflite)
+        # sin wrappers adecuados.
+        run: flutter build web
